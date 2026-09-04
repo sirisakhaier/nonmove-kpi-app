@@ -1,7 +1,7 @@
 // PUT /api/requests/:id — resubmit a needs_resubmit request
 import type { PagesFunction } from '@cloudflare/workers-types'
-import type { Env } from '../../_middleware'
-import { verifyJwt } from '../../_middleware'
+import type { Env } from '../_middleware'
+import { verifyJwt } from '../_middleware'
 
 export const onRequestPut: PagesFunction<Env> = async ({ request, env, params }) => {
   const auth = request.headers.get('Authorization') ?? ''

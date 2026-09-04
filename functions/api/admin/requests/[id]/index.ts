@@ -1,7 +1,7 @@
 // GET  /api/admin/requests/:id  — request detail
 // DELETE /api/admin/requests/:id — hard delete + audit log
 import type { PagesFunction } from '@cloudflare/workers-types'
-import type { Env } from '../../../../_middleware'
+import type { Env } from '../../../_middleware'
 import { requireAdmin, isResponse } from '../../_auth'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env, params }) => {

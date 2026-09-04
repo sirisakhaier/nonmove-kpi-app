@@ -1,6 +1,6 @@
 // POST /api/admin/requests/:id/reject
 import type { PagesFunction } from '@cloudflare/workers-types'
-import type { Env } from '../../../../_middleware'
+import type { Env } from '../../../_middleware'
 import { requireAdmin, isResponse } from '../../_auth'
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env, params }) => {
