@@ -1,0 +1,38 @@
+{
+  "name": "nonmove-kpi-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev dist --compatibility-date=2024-09-23",
+    "dev:vite": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "typecheck:functions": "tsc --noEmit -p tsconfig.functions.json",
+    "preview": "vite preview",
+    "db:migrate:local": "wrangler d1 migrations apply nonmove-kpi-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply nonmove-kpi-db --remote",
+    "db:reset:local": "wrangler d1 execute nonmove-kpi-db --local --file=migrations/0001_init.sql && wrangler d1 execute nonmove-kpi-db --local --file=migrations/0002_seed.sql"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "recharts": "^2.13.0",
+    "browser-image-compression": "^2.0.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "exceljs": "^4.4.0",
+    "tailwindcss": "^3.4.14",
+    "postcss": "^8.4.47",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "wrangler": "^3.80.4"
+  }
+}
