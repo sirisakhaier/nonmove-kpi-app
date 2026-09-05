@@ -5,7 +5,7 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "nonmove-kpi-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "d6d9cd41-f2bc-48b4-b515-90678dde1f9e"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
