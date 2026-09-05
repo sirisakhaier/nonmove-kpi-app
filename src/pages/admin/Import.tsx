@@ -168,7 +168,7 @@ export default function AdminImport() {
 
     try {
       const { date, rows, stores } = fileInfo
-      const chunkSize = 500
+      const chunkSize = 300
       const totalChunks = Math.ceil(rows.length / chunkSize)
       let totalInserted = 0
 

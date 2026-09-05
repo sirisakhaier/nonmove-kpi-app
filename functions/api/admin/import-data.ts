@@ -36,86 +36,94 @@ interface ImportDataPayload {
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const auth = await requireAdmin(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
-  if (isResponse(auth)) return auth
-
-  let body: ImportDataPayload
   try {
-    body = await request.json() as ImportDataPayload
-  } catch {
-    return Response.json({ error: 'Invalid JSON payload' }, { status: 400 })
-  }
+    const auth = await requireAdmin(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
+    if (isResponse(auth)) return auth
 
-  const { snapshot_date, is_first_chunk, replace, stores, rows } = body
-
-  if (!snapshot_date || !Array.isArray(rows)) {
-    return Response.json({ error: 'snapshot_date and rows required' }, { status: 400 })
-  }
-
-  // 1. If first chunk and replace requested, clear existing data for this date
-  if (is_first_chunk && replace) {
-    await env.DB.prepare(
-      `DELETE FROM stock_snapshots WHERE snapshot_date = ?`
-    ).bind(snapshot_date).run()
-  }
-
-  // 2. Upsert stores if provided in this chunk
-  if (stores && stores.length > 0) {
-    const storeStmts = stores.map(s =>
-      env.DB.prepare(
-        `INSERT OR REPLACE INTO stores (store_id, store_name, region, province, supervisor)
-         VALUES (?,?,?,?,?)`
-      ).bind(s.store_id, s.store_name, s.region, s.province, s.supervisor ?? null)
-    )
-    if (storeStmts.length > 0) {
-      await env.DB.batch(storeStmts)
+    let body: ImportDataPayload
+    try {
+      body = await request.json() as ImportDataPayload
+    } catch {
+      return Response.json({ error: 'Invalid JSON payload' }, { status: 400 })
     }
-  }
 
-  // 3. Insert snapshot rows in batches of 100
-  let inserted = 0
-  const batchSize = 100
+    const { snapshot_date, is_first_chunk, replace, stores, rows } = body
 
-  for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize)
-    const stmts = batch.map(row => {
-      const qty = Number(row.stock_qty) || 0
-      const stockAmt = Number(row.stock_amount) || 0
-      const skuAmt = Number(row.sku_amount) || 0
+    if (!snapshot_date || !Array.isArray(rows)) {
+      return Response.json({ error: 'snapshot_date and rows required' }, { status: 400 })
+    }
 
-      return env.DB.prepare(
-        `INSERT INTO stock_snapshots
-           (snapshot_date, store_id, category, subcategory, model, product_code,
-            product_name, stock_type, assortment, nonmove_period, nonmove_flag,
-            stock_qty, stock_amount, sku_amount, is_active)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`
-      ).bind(
-        snapshot_date,
-        row.store_id,
-        row.category ?? null,
-        row.subcategory ?? null,
-        row.model,
-        row.product_code ?? null,
-        row.product_name ?? null,
-        row.stock_type ?? null,
-        row.assortment ?? null,
-        row.nonmove_period ?? null,
-        row.nonmove_flag ?? null,
-        qty,
-        stockAmt,
-        skuAmt
-      )
+    // 1. If first chunk and replace requested, clear existing data for this date
+    if (is_first_chunk && replace) {
+      await env.DB.prepare(
+        `DELETE FROM stock_snapshots WHERE snapshot_date = ?`
+      ).bind(snapshot_date).run()
+    }
+
+    // 2. Upsert stores in smaller batches if provided
+    if (stores && stores.length > 0) {
+      const storeBatchSize = 25
+      for (let i = 0; i < stores.length; i += storeBatchSize) {
+        const sub = stores.slice(i, i + storeBatchSize)
+        const storeStmts = sub.map(s =>
+          env.DB.prepare(
+            `INSERT OR REPLACE INTO stores (store_id, store_name, region, province, supervisor)
+             VALUES (?,?,?,?,?)`
+          ).bind(s.store_id, s.store_name, s.region, s.province, s.supervisor ?? null)
+        )
+        if (storeStmts.length > 0) {
+          await env.DB.batch(storeStmts)
+        }
+      }
+    }
+
+    // 3. Insert snapshot rows in safe batches of 25
+    let inserted = 0
+    const batchSize = 25
+
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize)
+      const stmts = batch.map(row => {
+        const qty = Number(row.stock_qty) || 0
+        const stockAmt = Number(row.stock_amount) || 0
+        const skuAmt = Number(row.sku_amount) || 0
+
+        return env.DB.prepare(
+          `INSERT INTO stock_snapshots
+             (snapshot_date, store_id, category, subcategory, model, product_code,
+              product_name, stock_type, assortment, nonmove_period, nonmove_flag,
+              stock_qty, stock_amount, sku_amount, is_active)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`
+        ).bind(
+          snapshot_date,
+          row.store_id,
+          row.category ?? null,
+          row.subcategory ?? null,
+          row.model,
+          row.product_code ?? null,
+          row.product_name ?? null,
+          row.stock_type ?? null,
+          row.assortment ?? null,
+          row.nonmove_period ?? null,
+          row.nonmove_flag ?? null,
+          qty,
+          stockAmt,
+          skuAmt
+        )
+      })
+
+      if (stmts.length > 0) {
+        await env.DB.batch(stmts)
+        inserted += stmts.length
+      }
+    }
+
+    return Response.json({
+      ok: true,
+      snapshot_date,
+      rows_inserted: inserted,
     })
-
-    if (stmts.length > 0) {
-      await env.DB.batch(stmts)
-      inserted += stmts.length
-    }
+  } catch (err: any) {
+    return Response.json({ error: err.message ?? 'Internal server error during import' }, { status: 500 })
   }
-
-  return Response.json({
-    ok: true,
-    snapshot_date,
-    rows_inserted: inserted,
-  })
 }
