@@ -1,25 +1,18 @@
 #!/usr/bin/env node
-// ============================================================
-// scripts/import-xlsx.mjs
-// Bulk-import Stock_Daily_GH_for_Nonmove_KPI.xlsx into D1 (local)
-//
-// Usage:
-//   node scripts/import-xlsx.mjs path/to/Stock_Daily_GH_for_Nonmove_KPI.xlsx [--remote]
-//
-// Requirements:
-//   npm install xlsx   (already in package.json devDependencies)
-// ============================================================
-
-import { readFileSync, existsSync } from 'fs'
+// Fixed import script — imports Excel data into D1 (remote)
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
-import { join, resolve } from 'path'
+import { join } from 'path'
 import { fileURLToPath } from 'url'
 import XLSX from 'xlsx'
 
 const __dir = fileURLToPath(new URL('.', import.meta.url))
 const args = process.argv.slice(2)
-const filePath = args.find(a => !a.startsWith('--')) ?? join(__dir, '../Stock Daily GH for Nonmove KPI.xlsx')
+const filePath = args.find(a => !a.startsWith('--'))
+  ?? join(__dir, '../Stock Daily GH for Nonmove KPI.xlsx')
 const isRemote = args.includes('--remote')
+const flag = isRemote ? '--remote' : '--local'
+const dbName = 'nonmove-kpi-db'
 
 if (!existsSync(filePath)) {
   console.error(`File not found: ${filePath}`)
@@ -30,95 +23,87 @@ console.log(`Reading: ${filePath}`)
 const wb = XLSX.readFile(filePath, { cellDates: true })
 const ws = wb.Sheets[wb.SheetNames[0]]
 const rows = XLSX.utils.sheet_to_json(ws)
-
 console.log(`Total rows: ${rows.length}`)
 
 // Group by date
 const byDate = new Map()
 for (const row of rows) {
-  const d = row['Date'] instanceof Date
-    ? row['Date'].toISOString().split('T')[0]
-    : String(row['Date']).split('T')[0]
+  const raw = row['Date']
+  const d = raw instanceof Date
+    ? raw.toISOString().split('T')[0]
+    : String(raw ?? '').split('T')[0]
+  if (!d || d === 'undefined') continue
   if (!byDate.has(d)) byDate.set(d, [])
   byDate.get(d).push(row)
 }
-
 console.log(`Dates found: ${[...byDate.keys()].join(', ')}`)
 
-const flag = isRemote ? '--remote' : '--local'
-const dbName = 'nonmove-kpi-db'
-
-function execD1(sql) {
-  const escaped = sql.replace(/'/g, "''")
-  const tmpFile = `/tmp/nonmove_import_${Date.now()}.sql`
-  const { writeFileSync } = await import('fs')
-  writeFileSync(tmpFile, sql)
-  execSync(`npx wrangler d1 execute ${dbName} ${flag} --file=${tmpFile}`, { stdio: 'inherit' })
+function esc(v) {
+  return String(v ?? '').replace(/'/g, "''")
 }
 
-// Build and run SQL in batches
-for (const [date, dateRows] of byDate) {
-  console.log(`\nImporting date: ${date} (${dateRows.length} rows)`)
+function runSql(sql, tag) {
+  const tmp = `/tmp/nm_import_${Date.now()}.sql`
+  writeFileSync(tmp, sql)
+  try {
+    execSync(`npx wrangler d1 execute ${dbName} ${flag} --file=${tmp}`, { stdio: 'inherit' })
+  } finally {
+    try { unlinkSync(tmp) } catch {}
+  }
+}
 
-  // Upsert stores
+for (const [date, dateRows] of byDate) {
+  console.log(`\nImporting ${date} (${dateRows.length} rows)...`)
+
+  // Collect unique stores
   const stores = new Map()
   for (const r of dateRows) {
-    const sid = String(r['Store Id'] ?? '').trim()
-    if (sid && !stores.has(sid)) {
+    const sid = esc(r['Store Id'] ?? r['store_id'] ?? '')
+    if (!sid) continue
+    if (!stores.has(sid)) {
       stores.set(sid, {
         store_id: sid,
-        store_name: String(r['Store Name'] ?? '').trim().replace(/'/g, "''"),
-        region: String(r['Region'] ?? '').trim().replace(/'/g, "''"),
-        province: String(r['Province'] ?? '').trim().replace(/'/g, "''"),
-        supervisor: String(r['Supervisor'] ?? '').trim().replace(/'/g, "''") || 'NULL',
+        store_name: esc(r['Store Name'] ?? r['store_name'] ?? ''),
+        region: esc(r['Region'] ?? r['region'] ?? ''),
+        province: esc(r['Province'] ?? r['province'] ?? ''),
+        supervisor: esc(r['Supervisor'] ?? r['supervisor'] ?? ''),
       })
     }
   }
 
+  // Store upserts
   let storeSql = ''
   for (const s of stores.values()) {
-    storeSql += `INSERT OR REPLACE INTO stores (store_id,store_name,region,province,supervisor) VALUES ('${s.store_id}','${s.store_name}','${s.region}','${s.province}',${s.supervisor === 'NULL' ? 'NULL' : `'${s.supervisor}'`});\n`
+    const sup = s.supervisor ? `'${s.supervisor}'` : 'NULL'
+    storeSql += `INSERT OR REPLACE INTO stores (store_id,store_name,region,province,supervisor) VALUES ('${s.store_id}','${s.store_name}','${s.region}','${s.province}',${sup});\n`
+  }
+  if (storeSql) {
+    console.log(`  Upserting ${stores.size} stores...`)
+    runSql(storeSql)
   }
 
-  // Delete existing date then insert
-  let snapshotSql = `DELETE FROM stock_snapshots WHERE snapshot_date='${date}';\n`
-  const batchSize = 50
-  for (let i = 0; i < dateRows.length; i += batchSize) {
-    const batch = dateRows.slice(i, i + batchSize)
-    for (const r of batch) {
-      const sid = String(r['Store Id'] ?? '').trim().replace(/'/g, "''")
-      const model = String(r['Model'] ?? '').trim().replace(/'/g, "''")
-      const pname = String(r['Product Name'] ?? '').trim().replace(/'/g, "''")
-      const pcode = String(r['Product Code'] ?? '').trim()
-      const cat = String(r['Category'] ?? '').trim().replace(/'/g, "''")
-      const subcat = String(r['SubCategory'] ?? '').trim().replace(/'/g, "''")
-      const stype = String(r['Stock type'] ?? '').trim()
-      const assort = String(r['Assortment'] ?? '').trim()
-      const period = String(r['Nonmove Period'] ?? '').trim()
-      const nmFlag = String(r['Nonmove or normal'] ?? '').trim()
-      const qty = parseInt(r['Stock QTY']) || 0
-      const amt = parseFloat(r['Stock Amount']) || 0
-      const sku = parseFloat(r['SKU Amount']) || 0
-
-      snapshotSql += `INSERT INTO stock_snapshots (snapshot_date,store_id,category,subcategory,model,product_code,product_name,stock_type,assortment,nonmove_period,nonmove_flag,stock_qty,stock_amount,sku_amount) VALUES ('${date}','${sid}','${cat}','${subcat}','${model}','${pcode}','${pname}','${stype}','${assort}','${period}','${nmFlag}',${qty},${amt},${sku});\n`
-    }
+  // Snapshot inserts — delete existing date first, then batch insert
+  let snapSql = `DELETE FROM stock_snapshots WHERE snapshot_date='${date}';\n`
+  for (const r of dateRows) {
+    const sid = esc(r['Store Id'] ?? r['store_id'] ?? '')
+    if (!sid) continue
+    const model  = esc(r['Model'] ?? r['model'] ?? '')
+    const pname  = esc(r['Product Name'] ?? r['product_name'] ?? '')
+    const pcode  = esc(r['Product Code'] ?? r['product_code'] ?? '')
+    const cat    = esc(r['Category'] ?? r['category'] ?? '')
+    const subcat = esc(r['SubCategory'] ?? r['subcategory'] ?? '')
+    const stype  = esc(r['Stock type'] ?? r['stock_type'] ?? '')
+    const assort = esc(r['Assortment'] ?? r['assortment'] ?? '')
+    const period = esc(r['Nonmove Period'] ?? r['nonmove_period'] ?? '')
+    const nmFlag = esc(r['Nonmove or normal'] ?? r['nonmove_flag'] ?? '')
+    const qty    = parseInt(r['Stock QTY'] ?? r['stock_qty'] ?? 0) || 0
+    const amt    = parseFloat(r['Stock Amount'] ?? r['stock_amount'] ?? 0) || 0
+    const sku    = parseFloat(r['SKU Amount'] ?? r['sku_amount'] ?? 0) || 0
+    snapSql += `INSERT INTO stock_snapshots (snapshot_date,store_id,category,subcategory,model,product_code,product_name,stock_type,assortment,nonmove_period,nonmove_flag,stock_qty,stock_amount,sku_amount) VALUES ('${date}','${sid}','${cat}','${subcat}','${model}','${pcode}','${pname}','${stype}','${assort}','${period}','${nmFlag}',${qty},${amt},${sku});\n`
   }
-
-  // Write to temp file and execute
-  const { writeFileSync, unlinkSync } = await import('fs')
-  const tmpStore = `/tmp/store_${date}.sql`
-  const tmpSnap = `/tmp/snap_${date}.sql`
-  writeFileSync(tmpStore, storeSql)
-  writeFileSync(tmpSnap, snapshotSql)
-
-  console.log('  Upserting stores...')
-  execSync(`npx wrangler d1 execute ${dbName} ${flag} --file=${tmpStore}`, { stdio: 'inherit' })
-  console.log('  Inserting snapshots...')
-  execSync(`npx wrangler d1 execute ${dbName} ${flag} --file=${tmpSnap}`, { stdio: 'inherit' })
-
-  unlinkSync(tmpStore)
-  unlinkSync(tmpSnap)
-  console.log(`  Done: ${date}`)
+  console.log(`  Inserting ${dateRows.length} snapshots...`)
+  runSql(snapSql)
+  console.log(`  ✅ Done: ${date}`)
 }
 
 console.log('\n✅ Import complete!')

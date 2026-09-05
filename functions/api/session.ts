@@ -30,6 +30,6 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     role: 'pc',
     exp: Math.floor(Date.now() / 1000) + 86400,
   }
-  const token = await signJwt(payload, env.JWT_SECRET)
+  const token = await signJwt(payload, env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF')
   return Response.json({ token, store_id, store_name: store.store_name, region: store.region, name, phone })
 }

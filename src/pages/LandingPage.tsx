@@ -100,12 +100,15 @@ export default function LandingPage() {
 
             {/* Phone */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์ <span className="text-gray-400 text-xs">(10 หลัก)</span></label>
               <input
                 type="tel"
                 value={phone}
-                onChange={e => setPhone(e.target.value)}
+                onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                 placeholder="0812345678"
+                maxLength={10}
+                inputMode="numeric"
+                pattern="[0-9]{9,10}"
                 className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#0057A8]"
                 required
               />
