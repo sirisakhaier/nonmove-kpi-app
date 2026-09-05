@@ -8,9 +8,17 @@ import type {
 
 const BASE = ''
 
+function authHeaders(): Record<string, string> {
+  const adminToken = sessionStorage.getItem('admin_token')
+  const pcToken = sessionStorage.getItem('pc_token')
+  const token = adminToken || pcToken
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
+    credentials: 'include',
     ...options,
   })
   if (!res.ok) {
@@ -18,11 +26,6 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error((err as any).error ?? res.statusText)
   }
   return res.json() as Promise<T>
-}
-
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem('pc_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 // ---- Public / PC ----
@@ -60,6 +63,7 @@ export const api = {
     fetch('/api/requests', {
       method: 'POST',
       headers: authHeaders(),
+      credentials: 'include',
       body: formData,
     }).then(async r => {
       if (!r.ok) {
@@ -73,6 +77,7 @@ export const api = {
     fetch(`/api/requests/${id}`, {
       method: 'PUT',
       headers: authHeaders(),
+      credentials: 'include',
       body: formData,
     }).then(async r => {
       if (!r.ok) {
@@ -84,22 +89,28 @@ export const api = {
 
   // ---- Admin ----
 
-  adminLogin: (username: string, password: string) =>
-    fetch('/api/admin/login', {
+  adminLogin: async (username: string, password: string) => {
+    const res = await fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
       credentials: 'include',
-    }).then(async r => {
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({ error: r.statusText }))
-        throw new Error((e as any).error ?? r.statusText)
-      }
-      return r.json()
-    }),
+    })
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error((e as any).error ?? res.statusText)
+    }
+    const data = await res.json()
+    if (data.token) {
+      sessionStorage.setItem('admin_token', data.token)
+    }
+    return data
+  },
 
-  adminLogout: () =>
-    fetch('/api/admin/logout', { method: 'POST', credentials: 'include' }),
+  adminLogout: async () => {
+    sessionStorage.removeItem('admin_token')
+    return fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
+  },
 
   adminDashboard: (params?: Record<string, string>) =>
     request<{
@@ -118,6 +129,7 @@ export const api = {
   adminImport: (formData: FormData) =>
     fetch('/api/admin/import', {
       method: 'POST',
+      headers: authHeaders(),
       credentials: 'include',
       body: formData,
     }).then(async r => {
@@ -197,7 +209,7 @@ export const api = {
 
   adminExportRequests: (params?: Record<string, string>) => {
     const url = '/api/admin/export/requests?' + new URLSearchParams(params ?? {})
-    return fetch(url, { credentials: 'include' }).then(r => {
+    return fetch(url, { headers: authHeaders(), credentials: 'include' }).then(r => {
       if (!r.ok) throw new Error('Export failed')
       return r.blob()
     })
@@ -206,6 +218,7 @@ export const api = {
   adminImportRequests: (formData: FormData) =>
     fetch('/api/admin/import-requests', {
       method: 'POST',
+      headers: authHeaders(),
       credentials: 'include',
       body: formData,
     }).then(async r => {
@@ -218,7 +231,7 @@ export const api = {
 
   adminExportKpi: (month: string) => {
     const url = `/api/admin/export/kpi?month=${month}`
-    return fetch(url, { credentials: 'include' }).then(r => {
+    return fetch(url, { headers: authHeaders(), credentials: 'include' }).then(r => {
       if (!r.ok) throw new Error('Export failed')
       return r.blob()
     })

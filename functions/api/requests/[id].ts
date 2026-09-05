@@ -6,7 +6,7 @@ import { verifyJwt } from '../_middleware'
 export const onRequestPut: PagesFunction<Env> = async ({ request, env, params }) => {
   const auth = request.headers.get('Authorization') ?? ''
   const token = auth.replace('Bearer ', '')
-  const session = await verifyJwt(token, env.JWT_SECRET)
+  const session = await verifyJwt(token, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const id = Number((params as any).id)

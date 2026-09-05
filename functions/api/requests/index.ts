@@ -12,7 +12,7 @@ async function getSession(request: Request, secret: string) {
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
-  const session = await getSession(request, env.JWT_SECRET)
+  const session = await getSession(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { results } = await env.DB.prepare(
@@ -32,7 +32,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const session = await getSession(request, env.JWT_SECRET)
+  const session = await getSession(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const form = await request.formData()

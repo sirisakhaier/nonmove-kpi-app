@@ -8,7 +8,7 @@ import { requireAdmin, isResponse } from './_auth'
 // NOTE: xlsx must be bundled; it is not a native Worker API.
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const auth = await requireAdmin(request, env.JWT_SECRET)
+  const auth = await requireAdmin(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
   if (isResponse(auth)) return auth
 
   const form = await request.formData()

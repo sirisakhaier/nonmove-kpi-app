@@ -4,7 +4,7 @@ import type { Env } from '../_middleware'
 import { requireAdmin, isResponse } from './_auth'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
-  const auth = await requireAdmin(request, env.JWT_SECRET)
+  const auth = await requireAdmin(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
   if (isResponse(auth)) return auth
 
   const row = await env.DB.prepare(
@@ -15,7 +15,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 }
 
 export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
-  const auth = await requireAdmin(request, env.JWT_SECRET)
+  const auth = await requireAdmin(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
   if (isResponse(auth)) return auth
 
   const { included_stock_types } = await request.json() as { included_stock_types: string[] }

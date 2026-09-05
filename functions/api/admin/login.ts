@@ -60,7 +60,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     'Set-Cookie',
     `admin_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${86400 * 7}`
   )
-  return new Response(JSON.stringify({ ok: true, username: user.username }), {
+  return new Response(JSON.stringify({ ok: true, token, username: user.username }), {
     status: 200,
     headers,
   })
