@@ -22,23 +22,21 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     FROM exclusion_requests er
     JOIN stores s ON s.store_id = er.store_id
     LEFT JOIN request_photos rp ON rp.exclusion_request_id = er.id
-    WHERE 1=1
   `
+  if (period) {
+    q += ' JOIN stock_snapshots ss ON ss.id = er.stock_snapshot_id'
+  }
+
+  q += ' WHERE 1=1'
   const binds: (string | null)[] = []
 
   if (region) { q += ' AND s.region = ?'; binds.push(region) }
   if (store) { q += ' AND er.store_id = ?'; binds.push(store) }
   if (status) { q += ' AND er.status = ?'; binds.push(status) }
   if (reason) { q += ' AND er.reason = ?'; binds.push(reason) }
+  if (period) { q += ' AND ss.nonmove_period = ?'; binds.push(period) }
   if (from) { q += ' AND er.created_at >= ?'; binds.push(from) }
   if (to) { q += ' AND er.created_at <= ?'; binds.push(to + ' 23:59:59') }
-
-  // join to get nonmove_period filter
-  if (period) {
-    q += ` AND er.stock_snapshot_id IN (
-      SELECT id FROM stock_snapshots WHERE nonmove_period = ?)`
-    binds.push(period)
-  }
 
   q += ' GROUP BY er.id ORDER BY er.created_at DESC'
 
@@ -51,3 +49,4 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }))
   return Response.json(enriched)
 }
+

@@ -2,7 +2,7 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
 import type { Env } from '../../_middleware'
 import { requireAdmin, isResponse } from '../_auth'
-import { calcStoreKpi } from '../../_kpi_calc'
+import { calcAllStoresKpi } from '../../_kpi_calc'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const auth = await requireAdmin(request, (env.JWT_SECRET ?? 'haier-nonmove-kpi-secret-2024-xYz9abcDEF'))
@@ -12,12 +12,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const month = url.searchParams.get('month') // YYYY-MM
   const refDate = month ? `${month}-01` : undefined
 
-  const { results: stores } = await env.DB.prepare(
-    'SELECT store_id FROM stores ORDER BY region, store_id'
-  ).all<{ store_id: string }>()
-
-  const results = await Promise.all(stores.map(s => calcStoreKpi(env.DB, s.store_id, refDate)))
-  const valid = results.filter(Boolean) as NonNullable<typeof results[0]>[]
+  const results = await calcAllStoresKpi(env.DB, { refDate })
+  const valid = results.filter(Boolean)
 
   const headers = [
     'Store ID', 'Store Name', 'Region',
@@ -50,3 +46,4 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     },
   })
 }
+
