@@ -58,18 +58,43 @@ export interface ExclusionRequest {
   admin_comment?: string
   created_at: string
   updated_at: string
-  photos?: string[]       // photo_url array
-  store_name?: string     // joined
-  region?: string         // joined
+  photos?: string[]
+  store_name?: string
+  region?: string
+}
+
+export interface PeriodMetrics {
+  sku_count: number
+  qty: number
+  amount: number
+}
+
+export interface PeriodDetail {
+  reference: PeriodMetrics
+  latest: PeriodMetrics
+  diff_amount: number
+  pct_gap: number
+}
+
+export interface PeriodMatrix {
+  reference_date: string
+  latest_date: string
+  periods: {
+    '121 up': PeriodDetail
+    '91-120': PeriodDetail
+    '61-90': PeriodDetail
+    '30-60': PeriodDetail
+    'total': PeriodDetail
+  }
 }
 
 export interface KpiResult {
   store_id: string
   store_name: string
   region: string
-  reference_date?: string
+  reference_date: string
   reference_amount: number
-  latest_date?: string
+  latest_date: string
   latest_amount: number
   pct_gap: number
   rank_tier: number
@@ -78,6 +103,7 @@ export interface KpiResult {
   bucket_label: string
   bucket_type: 'penalty' | 'reward'
   amount_thb: number
+  matrix?: PeriodMatrix
 }
 
 export interface KpiRateRow {
@@ -97,7 +123,7 @@ export interface KpiRateRow {
 
 export interface KpiSettings {
   id: number
-  included_stock_types: string[]  // parsed from JSON
+  included_stock_types: string[]
   updated_at: string
 }
 

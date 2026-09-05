@@ -197,11 +197,11 @@ export default function AdminImport() {
           {/* Quick Guide Card */}
           <div className="lg:col-span-6 bg-white rounded-2xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
             <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-1">💡 คำแนะนำรอบข้อมูล (Snapshot Dates)</h2>
+              <h2 className="text-lg font-bold text-gray-900 mb-1">💡 คำแนะนำวันที่ในข้อมูล (Stock Dates Guide)</h2>
               <div className="text-xs text-gray-600 space-y-3 mt-3 leading-relaxed">
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                   <strong className="text-[#0057A8] block mb-1">1. การเปรียบเทียบ KPI:</strong>
-                  ระบบจะใช้ข้อมูลวันแรกของเดือน (วันที่ 1 หรือวันแรกที่มีข้อมูลในเดือน) เป็น <strong>ยอดอ้างอิง (Reference)</strong> และใช้วันล่าสุดที่มีสถานะ Active เป็น <strong>ยอดประเมินผล</strong>
+                  ระบบจะใช้วันที่ 1 ของเดือน (หรือวันแรกสุดที่มีข้อมูลในเดือน) เป็น <strong>ยอดอ้างอิงต้นเดือน (1st Date of Month)</strong> และใช้วันที่ล่าสุดที่มีสถานะ Active เป็น <strong>ยอดประเมินผลล่าสุด (Latest Date)</strong>
                 </div>
 
                 <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
@@ -211,7 +211,7 @@ export default function AdminImport() {
 
                 <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
                   <strong className="text-rose-800 block mb-1">3. การลบข้อมูลทั้งวันที่:</strong>
-                  หากอัปโหลดไฟล์ผิด สามารถกดปุ่มลบ (Delete) ข้อมูลทั้งหมดของวันที่นั้นได้ทันที
+                  หากอัปโหลดไฟล์ผิด สามารถกดปุ่มลบข้อมูลทั้งหมดของวันที่นั้นได้ทันที
                 </div>
               </div>
             </div>
@@ -223,10 +223,10 @@ export default function AdminImport() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-100">
             <div>
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                <span>📅 จัดการรอบข้อมูลตามวันที่ ({snapshots.length} วันที่)</span>
+                <span>📅 จัดการวันที่ในข้อมูล ({snapshots.length} วันที่)</span>
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                เปิด/ปิดการใช้งาน หรือลบข้อมูลรอบวันที่ต่างๆ ในระบบ D1 Database
+                เปิด/ปิดการใช้งาน หรือลบข้อมูลของแต่ละวันที่ในระบบ D1 Database
               </p>
             </div>
             <button
@@ -240,14 +240,14 @@ export default function AdminImport() {
           {loadingSnapshots && (
             <div className="py-12 text-center text-gray-400 space-y-2">
               <div className="animate-spin text-3xl">⏳</div>
-              <div className="text-xs">กำลังโหลดรอบข้อมูล...</div>
+              <div className="text-xs">กำลังโหลดข้อมูล...</div>
             </div>
           )}
 
           {!loadingSnapshots && snapshots.length === 0 && (
             <div className="py-12 text-center text-gray-400">
               <div className="text-4xl mb-2">📂</div>
-              <div className="font-bold text-gray-600 text-sm">ยังไม่มีรอบข้อมูลในระบบ</div>
+              <div className="font-bold text-gray-600 text-sm">ยังไม่มีข้อมูลในระบบ</div>
               <div className="text-xs text-gray-400 mt-1">กรุณานำเข้าไฟล์ Excel ด้านบน</div>
             </div>
           )}
@@ -257,7 +257,7 @@ export default function AdminImport() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-gray-50 text-gray-500 font-bold border-b border-gray-200">
-                    <th className="py-3 px-4 rounded-l-xl">วันที่รอบข้อมูล (Snapshot Date)</th>
+                    <th className="py-3 px-4 rounded-l-xl">วันที่ในข้อมูล (Date)</th>
                     <th className="py-3 px-4 text-center">จำนวนข้อมูล (Rows)</th>
                     <th className="py-3 px-4 text-center">จำนวนสาขา (Stores)</th>
                     <th className="py-3 px-4 text-right">ยอดรวม Nonmove (THB)</th>
