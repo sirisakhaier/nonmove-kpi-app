@@ -152,6 +152,22 @@ export const api = {
       }>
     }),
 
+  adminImportData: (payload: {
+    snapshot_date: string
+    is_first_chunk: boolean
+    replace: boolean
+    stores?: any[]
+    rows: any[]
+  }) =>
+    request<{ ok: boolean; snapshot_date: string; rows_inserted: number }>(
+      '/api/admin/import-data',
+      {
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      }
+    ),
+
   adminGetSnapshots: () =>
     request<SnapshotDateInfo[]>('/api/admin/snapshots', { credentials: 'include' }),
 

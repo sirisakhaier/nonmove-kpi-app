@@ -1,16 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import * as XLSX from 'xlsx'
 import { api } from '../../lib/api'
 import type { SnapshotDateInfo } from '../../types'
 import Header from '../../components/Header'
 import { formatAmount } from '../../lib/kpi'
+import { extractExactDate } from '../../lib/excelDate'
+
+interface ParsedFileInfo {
+  file: File
+  date: string
+  rowsCount: number
+  storesCount: number
+  stores: any[]
+  rows: any[]
+}
 
 export default function AdminImport() {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [file, setFile] = useState<File | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const [fileInfo, setFileInfo] = useState<ParsedFileInfo | null>(null)
   const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [progressText, setProgressText] = useState('')
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
-  const [needsConfirm, setNeedsConfirm] = useState(false)
+  const [duplicateModal, setDuplicateModal] = useState<SnapshotDateInfo | null>(null)
 
   // Snapshot dates management state
   const [snapshots, setSnapshots] = useState<SnapshotDateInfo[]>([])
@@ -24,8 +38,10 @@ export default function AdminImport() {
     try {
       const data = await api.adminGetSnapshots()
       setSnapshots(data)
+      return data
     } catch (e: any) {
       console.error('Failed to load snapshots:', e)
+      return []
     } finally {
       setLoadingSnapshots(false)
     }
@@ -35,29 +51,167 @@ export default function AdminImport() {
     loadSnapshots()
   }, [loadSnapshots])
 
-  const doImport = async (replace = false) => {
+  // Handle file selection and client-side parsing
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
     if (!file) return
+
+    setParsing(true)
+    setError('')
+    setResult(null)
+    setDuplicateModal(null)
+    setFileInfo(null)
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array' })
+      const wsName = wb.SheetNames[0]
+      const ws = wb.Sheets[wsName]
+      const rawRows: any[] = XLSX.utils.sheet_to_json(ws)
+
+      if (rawRows.length === 0) {
+        throw new Error('ไฟล์ Excel ว่างเปล่า ไม่มีข้อมูล')
+      }
+
+      // 1. Extract exact date from first row's Date column
+      const firstRow = rawRows[0]
+      const dateRawVal = firstRow['Date'] ?? firstRow['date'] ?? firstRow['DATE']
+      const cellA2 = ws['A2']
+      const formattedText = cellA2?.w
+
+      const exactDate = extractExactDate(dateRawVal, formattedText)
+      if (!exactDate) {
+        throw new Error('ไม่พบข้อมูลคอลัมน์ "Date" หรือรูปแบบวันที่ไม่ถูกต้องในแถวแรก')
+      }
+
+      // 2. Normalize and clean rows
+      const storesMap = new Map<string, any>()
+      const cleanedRows: any[] = []
+
+      for (let i = 0; i < rawRows.length; i++) {
+        const r = rawRows[i]
+        // Normalize keys (trim whitespace in column headers)
+        const row: Record<string, any> = {}
+        for (const [k, v] of Object.entries(r)) {
+          row[k.trim()] = v
+        }
+
+        const sid = String(row['Store Id'] ?? row['store_id'] ?? '').trim()
+        const model = String(row['Model'] ?? row['model'] ?? '').trim()
+        if (!sid || !model) continue
+
+        // Collect unique stores
+        if (!storesMap.has(sid)) {
+          storesMap.set(sid, {
+            store_id: sid,
+            store_name: String(row['Store Name'] ?? row['store_name'] ?? '').trim(),
+            region: String(row['Region'] ?? row['region'] ?? '').trim(),
+            province: String(row['Province'] ?? row['province'] ?? '').trim(),
+            supervisor: String(row['Supervisor'] ?? row['supervisor'] ?? '').trim() || null,
+          })
+        }
+
+        const qty = parseInt(row['Stock QTY'] ?? row['stock_qty'] ?? 0) || 0
+        const stockAmt = parseFloat(row['Stock Amount'] ?? row['stock_amount'] ?? 0) || 0
+        const skuAmt = parseFloat(row['SKU Amount'] ?? row['sku_amount'] ?? 0) || 0
+
+        cleanedRows.push({
+          store_id: sid,
+          model,
+          category: String(row['Category'] ?? row['category'] ?? '').trim() || null,
+          subcategory: String(row['SubCategory'] ?? row['subcategory'] ?? '').trim() || null,
+          product_code: String(row['Product Code'] ?? row['product_code'] ?? '').trim() || null,
+          product_name: String(row['Product Name'] ?? row['product_name'] ?? '').trim() || null,
+          stock_type: String(row['Stock type'] ?? row['stock_type'] ?? '').trim() || null,
+          assortment: String(row['Assortment'] ?? row['assortment'] ?? '').trim() || null,
+          nonmove_period: String(row['Nonmove Period'] ?? row['nonmove_period'] ?? '').trim() || null,
+          nonmove_flag: String(row['Nonmove or normal'] ?? row['nonmove_flag'] ?? '').trim() || null,
+          stock_qty: qty,
+          stock_amount: stockAmt,
+          sku_amount: skuAmt,
+        })
+      }
+
+      const parsed: ParsedFileInfo = {
+        file,
+        date: exactDate,
+        rowsCount: cleanedRows.length,
+        storesCount: storesMap.size,
+        stores: Array.from(storesMap.values()),
+        rows: cleanedRows,
+      }
+
+      setFileInfo(parsed)
+
+      // 3. Check if exact date already exists in database
+      const existing = snapshots.find(s => s.snapshot_date === exactDate)
+      if (existing) {
+        setDuplicateModal(existing)
+      }
+    } catch (err: any) {
+      setError(err.message ?? 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel')
+      if (fileRef.current) fileRef.current.value = ''
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  // Execute upload in chunks
+  const executeUpload = async (replace = false) => {
+    if (!fileInfo) return
+
     setLoading(true)
     setError('')
     setResult(null)
-    setNeedsConfirm(false)
+    setDuplicateModal(null)
+    setProgress(0)
+
     try {
-      const form = new FormData()
-      form.append('file', file)
-      if (replace) form.append('replace', 'true')
-      const r = await api.adminImport(form)
-      setResult(r)
-      setFile(null)
-      await loadSnapshots()
-    } catch (e: any) {
-      if (e.message?.includes('already exists') || e.message?.includes('needs_confirm')) {
-        setNeedsConfirm(true)
-      } else {
-        setError(e.message ?? 'Import failed')
+      const { date, rows, stores } = fileInfo
+      const chunkSize = 500
+      const totalChunks = Math.ceil(rows.length / chunkSize)
+      let totalInserted = 0
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkRows = rows.slice(i * chunkSize, (i + 1) * chunkSize)
+        const isFirstChunk = i === 0
+
+        setProgressText(`กำลังบันทึกข้อมูล... ${Math.round(((i + 1) / totalChunks) * 100)}% (${Math.min((i + 1) * chunkSize, rows.length).toLocaleString()} / ${rows.length.toLocaleString()} แถว)`)
+        setProgress(Math.round(((i + 1) / totalChunks) * 100))
+
+        const res = await api.adminImportData({
+          snapshot_date: date,
+          is_first_chunk: isFirstChunk,
+          replace: replace,
+          stores: isFirstChunk ? stores : undefined,
+          rows: chunkRows,
+        })
+
+        totalInserted += res.rows_inserted
       }
+
+      setResult({
+        date,
+        rows_imported: totalInserted,
+        stores_upserted: stores.length,
+        replaced: replace,
+      })
+      setFileInfo(null)
+      if (fileRef.current) fileRef.current.value = ''
+      await loadSnapshots()
+    } catch (err: any) {
+      setError(err.message ?? 'การนำเข้าข้อมูลล้มเหลว กรุณาลองใหม่อีกครั้ง')
     } finally {
       setLoading(false)
+      setProgress(0)
+      setProgressText('')
     }
+  }
+
+  const cancelDuplicateUpload = () => {
+    setDuplicateModal(null)
+    setFileInfo(null)
+    if (fileRef.current) fileRef.current.value = ''
   }
 
   const handleToggle = async (date: string, currentActive: number) => {
@@ -92,133 +246,137 @@ export default function AdminImport() {
       <Header adminMode title="จัดการข้อมูล & นำเข้า Excel" />
 
       <div className="max-w-7xl w-full mx-auto px-4 py-8 space-y-8">
-        {/* Top: Import Box & Summary Cards */}
+        {/* Top: Import Box & Summary Guide */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Import Card */}
-          <div className="lg:col-span-6 bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <h2 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
-              <span>📥 นำเข้าไฟล์ Stock รายวัน (.xlsx)</span>
-            </h2>
-            <p className="text-xs text-gray-500 mb-4">
-              อัปโหลดไฟล์ Excel ในรูปแบบ <code>Stock Daily GH for Nonmove KPI.xlsx</code> ระบบจะบันทึกข้อมูลและอัปเดตรายชื่อสาขาอัตโนมัติ
-            </p>
+          <div className="lg:col-span-6 bg-white rounded-2xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
+                <span>📥 นำเข้าไฟล์ Stock รายวัน (.xlsx)</span>
+              </h2>
+              <p className="text-xs text-gray-500 mb-4">
+                อัปโหลดไฟล์ Excel ในรูปแบบ <code>Stock Daily GH for Nonmove KPI.xlsx</code> ระบบจะอ่านคอลัมน์ <strong>Date</strong> ตามข้อมูลจริง และบันทึกข้อมูลอย่างแม่นยำ
+              </p>
 
-            <div
-              onClick={() => fileRef.current?.click()}
-              className="border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center cursor-pointer hover:border-[#0057A8] hover:bg-blue-50/50 transition-all group"
-            >
-              <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📁</div>
-              {file ? (
-                <div>
-                  <div className="font-bold text-gray-800 text-sm">{file.name}</div>
-                  <div className="text-xs text-gray-400 mt-1">{(file.size / 1024).toFixed(1)} KB</div>
+              <div
+                onClick={() => !loading && !parsing && fileRef.current?.click()}
+                className={`border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                  loading || parsing ? 'bg-gray-50 cursor-not-allowed' : 'hover:border-[#0057A8] hover:bg-blue-50/50 group'
+                }`}
+              >
+                <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">
+                  {parsing ? '⏳' : '📁'}
                 </div>
-              ) : (
-                <div>
-                  <div className="text-xs font-bold text-[#0057A8]">คลิกเพื่อเลือกไฟล์ Excel หรือลากไฟล์มาวาง</div>
-                  <div className="text-[11px] text-gray-400 mt-1">รองรับนามสกุล .xlsx</div>
+                {parsing ? (
+                  <div>
+                    <div className="font-bold text-[#0057A8] text-sm">กำลังตรวจสอบข้อมูลในไฟล์ Excel...</div>
+                    <div className="text-xs text-gray-400 mt-1">กรุณารอสักครู่</div>
+                  </div>
+                ) : fileInfo ? (
+                  <div>
+                    <div className="font-bold text-emerald-800 text-sm">{fileInfo.file.name}</div>
+                    <div className="text-xs text-gray-600 mt-1">
+                      📅 วันที่ในไฟล์: <strong className="text-gray-900">{fileInfo.date}</strong> · {fileInfo.rowsCount.toLocaleString()} แถว · {fileInfo.storesCount} สาขา
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-xs font-bold text-[#0057A8]">คลิกเพื่อเลือกไฟล์ Excel หรือลากไฟล์มาวาง</div>
+                    <div className="text-[11px] text-gray-400 mt-1">รองรับนามสกุล .xlsx (ใช้ค่าจากคอลัมน์ Date โดยตรง)</div>
+                  </div>
+                )}
+              </div>
+
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {/* Progress Bar when uploading */}
+              {loading && (
+                <div className="mt-4 space-y-1.5">
+                  <div className="flex justify-between text-xs font-bold text-gray-700">
+                    <span>{progressText}</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="bg-[#0057A8] h-3 rounded-full transition-all duration-200"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-4 text-rose-700 text-xs bg-rose-50 border border-rose-200 rounded-xl p-3">
+                  {error}
+                </div>
+              )}
+
+              {result && (
+                <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-800">
+                  <div className="font-bold mb-1 flex items-center gap-1.5">
+                    <span>✓</span>
+                    <span>นำเข้าข้อมูลสำเร็จ!</span>
+                  </div>
+                  <div className="space-y-0.5 mt-2 font-medium">
+                    <div>วันที่ในข้อมูล: <strong className="font-black text-gray-900">{result.date}</strong></div>
+                    <div>จำนวนข้อมูลที่บันทึก: <strong>{result.rows_imported?.toLocaleString()} แถว</strong></div>
+                    <div>สาขาที่อัปเดต: <strong>{result.stores_upserted} สาขา</strong></div>
+                    {result.replaced && <div className="text-amber-800 font-bold mt-1">*(เขียนทับข้อมูลเดิมของวันที่นี้เรียบร้อย)</div>}
+                  </div>
                 </div>
               )}
             </div>
 
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx"
-              className="hidden"
-              onChange={e => {
-                setFile(e.target.files?.[0] ?? null)
-                setResult(null)
-                setError('')
-                setNeedsConfirm(false)
-              }}
-            />
-
-            {needsConfirm && (
-              <div className="mt-4 bg-amber-50 border border-amber-300 rounded-xl p-4 text-xs">
-                <div className="text-amber-900 font-bold mb-1">⚠️ วันที่นี้มีข้อมูลอยู่ในระบบแล้ว</div>
-                <p className="text-amber-700 mb-3 leading-relaxed">
-                  คุณต้องการลบข้อมูลเดิมของวันที่นี้แล้วบันทึกข้อมูลใหม่แทนที่หรือไม่?
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => doImport(true)}
-                    className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-bold"
-                  >
-                    ยืนยันเขียนทับข้อมูลเดิม
-                  </button>
-                  <button
-                    onClick={() => setNeedsConfirm(false)}
-                    className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium"
-                  >
-                    ยกเลิก
-                  </button>
-                </div>
-              </div>
+            {/* Action Buttons */}
+            {fileInfo && !duplicateModal && (
+              <button
+                onClick={() => executeUpload(false)}
+                disabled={loading || parsing}
+                className="mt-6 w-full bg-[#0057A8] hover:bg-[#004A8F] active:bg-[#003D75] text-white font-bold py-3.5 rounded-xl text-sm transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <span className="animate-spin">⏳</span>
+                    <span>กำลังบันทึกข้อมูล...</span>
+                  </>
+                ) : (
+                  <span>🚀 ยืนยันนำเข้าข้อมูลวันที่ {fileInfo.date} ({fileInfo.rowsCount.toLocaleString()} แถว)</span>
+                )}
+              </button>
             )}
-
-            {error && !needsConfirm && (
-              <div className="mt-4 text-rose-700 text-xs bg-rose-50 border border-rose-200 rounded-xl p-3">
-                {error}
-              </div>
-            )}
-
-            {result && (
-              <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-800">
-                <div className="font-bold mb-1 flex items-center gap-1.5">
-                  <span>✓</span>
-                  <span>นำเข้าข้อมูลสำเร็จ!</span>
-                </div>
-                <div className="space-y-0.5 mt-2">
-                  <div>รอบวันที่: <strong>{result.date}</strong></div>
-                  <div>จำนวนข้อมูลที่บันทึก: <strong>{result.rows_imported?.toLocaleString()} แถว</strong></div>
-                  <div>สาขาที่อัปเดต: <strong>{result.stores_upserted} สาขา</strong></div>
-                  {result.replaced && <div className="text-amber-700">*(เขียนทับข้อมูลเดิมเรียบร้อย)</div>}
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={() => doImport(false)}
-              disabled={!file || loading}
-              className="mt-4 w-full bg-[#0057A8] hover:bg-[#004A8F] active:bg-[#003D75] text-white font-bold py-3 rounded-xl text-sm transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <span className="animate-spin">⏳</span>
-                  <span>กำลังประมวลผล...</span>
-                </>
-              ) : (
-                <span>🚀 บันทึกข้อมูลเข้าสู่ระบบ</span>
-              )}
-            </button>
           </div>
 
-          {/* Quick Guide Card */}
+          {/* Guide Card */}
           <div className="lg:col-span-6 bg-white rounded-2xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
             <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-1">💡 คำแนะนำวันที่ในข้อมูล (Stock Dates Guide)</h2>
+              <h2 className="text-lg font-bold text-gray-900 mb-1">💡 คำแนะนำวันที่ในข้อมูล (Exact Date Rules)</h2>
               <div className="text-xs text-gray-600 space-y-3 mt-3 leading-relaxed">
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-                  <strong className="text-[#0057A8] block mb-1">1. การเปรียบเทียบ KPI:</strong>
-                  ระบบจะใช้วันที่ 1 ของเดือน (หรือวันแรกสุดที่มีข้อมูลในเดือน) เป็น <strong>ยอดอ้างอิงต้นเดือน (1st Date of Month)</strong> และใช้วันที่ล่าสุดที่มีสถานะ Active เป็น <strong>ยอดประเมินผลล่าสุด (Latest Date)</strong>
+                  <strong className="text-[#0057A8] block mb-1">1. ใช้วันที่จริงจากคอลัมน์ Date:</strong>
+                  ระบบจะอ่านวันที่จากคอลัมน์ <strong>Date</strong> ในไฟล์ Excel โดยตรง ไม่มีการปรับเปลี่ยนหรือเลื่อนวัน
+                </div>
+
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                  <strong className="text-amber-800 block mb-1">2. ตรวจสอบข้อมูลซ้ำอัตโนมัติ:</strong>
+                  หากตรวจพบว่าวันที่ในไฟล์ Excel มีอยู่ในระบบแล้ว ระบบจะแสดงหน้าต่างแจ้งเตือนให้เลือกว่าจะ <strong>"แทนที่ข้อมูลเดิม (Replace)"</strong> หรือ <strong>"ยกเลิก (Cancel)"</strong> ทันที ป้องกันข้อมูลซ้ำซ้อน
                 </div>
 
                 <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-                  <strong className="text-emerald-800 block mb-1">2. การเปิด/ปิดสถานะ (Active / Inactive):</strong>
-                  สามารถคลิกสวิตช์เพื่อปิดวันที่ยังไม่ต้องการนำมาคำนวณ KPI ได้โดยไม่ต้องลบข้อมูล
-                </div>
-
-                <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
-                  <strong className="text-rose-800 block mb-1">3. การลบข้อมูลทั้งวันที่:</strong>
-                  หากอัปโหลดไฟล์ผิด สามารถกดปุ่มลบข้อมูลทั้งหมดของวันที่นั้นได้ทันที
+                  <strong className="text-emerald-800 block mb-1">3. การประเมินผล KPI:</strong>
+                  ระบบจะเปรียบเทียบระหว่าง <strong>วันที่ต้นเดือน (1st Date of Month)</strong> กับ <strong>วันที่ล่าสุด (Latest Date)</strong> ที่เปิดสถานะ Active อยู่
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Bottom: Snapshot Dates Management Table (Requirement #5) */}
+        {/* Bottom: Snapshot Dates Management Table */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-100">
             <div>
@@ -320,12 +478,57 @@ export default function AdminImport() {
         </div>
       </div>
 
+      {/* Duplicate Date Alert Modal (Requirement #2) */}
+      {duplicateModal && fileInfo && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center text-3xl mx-auto">
+              ⚠️
+            </div>
+            <div className="text-center">
+              <h3 className="font-bold text-lg text-gray-900">
+                พบข้อมูลวันที่ {fileInfo.date} ในระบบแล้ว
+              </h3>
+              <p className="text-xs text-gray-600 mt-2 leading-relaxed">
+                ในระบบมีข้อมูลของวันที่ <strong>{fileInfo.date}</strong> อยู่แล้วจำนวน <strong>{duplicateModal.total_rows.toLocaleString()} แถว</strong>
+                <br />
+                (ไฟล์ที่คุณเลือกมีข้อมูลใหม่จำนวน <strong>{fileInfo.rowsCount.toLocaleString()} แถว</strong>)
+              </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 mt-3 text-left">
+                💡 <strong>ต้องการดำเนินการอย่างไร?</strong>
+                <ul className="list-disc list-inside mt-1 space-y-0.5 text-amber-800">
+                  <li><strong>แทนที่ข้อมูลเดิม (Replace):</strong> ลบข้อมูลเดิมของวันที่นี้ออก แล้วบันทึกข้อมูลจากไฟล์ใหม่แทนที่</li>
+                  <li><strong>ยกเลิก (Cancel):</strong> ไม่นำเข้าไฟล์นี้ ข้อมูลเดิมในระบบจะคงเดิม ไม่เกิดข้อมูลซ้ำ</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                onClick={() => executeUpload(true)}
+                disabled={loading}
+                className="bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white py-3 rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5"
+              >
+                <span>🔄 แทนที่ข้อมูลเดิม (Replace)</span>
+              </button>
+              <button
+                onClick={cancelDuplicateUpload}
+                disabled={loading}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl text-xs font-semibold"
+              >
+                ✕ ยกเลิก (Cancel)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Modal */}
       {dateToDelete && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
             <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-2xl mx-auto">
-              ⚠️
+              🗑️
             </div>
             <div className="text-center">
               <h3 className="font-bold text-lg text-gray-900">ยืนยันลบข้อมูลวันที่ {dateToDelete}?</h3>
