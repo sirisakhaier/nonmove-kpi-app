@@ -40,7 +40,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
             SUM(stock_amount) as total_amount,
             COUNT(DISTINCT store_id) as store_count
      FROM stock_snapshots
-     WHERE nonmove_flag = 'Nonmove'
+     WHERE nonmove_flag = 'Nonmove' AND COALESCE(is_active, 1) = 1
      GROUP BY snapshot_date
      ORDER BY snapshot_date`
   ).all()

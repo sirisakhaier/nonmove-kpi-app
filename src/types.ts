@@ -26,6 +26,9 @@ export interface StockSnapshot {
   stock_qty?: number
   stock_amount?: number
   sku_amount?: number
+  is_active?: number
+  request_status?: RequestStatus | null
+  is_excluded?: boolean
 }
 
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'needs_resubmit'
@@ -64,7 +67,9 @@ export interface KpiResult {
   store_id: string
   store_name: string
   region: string
+  reference_date?: string
   reference_amount: number
+  latest_date?: string
   latest_amount: number
   pct_gap: number
   rank_tier: number
@@ -94,6 +99,14 @@ export interface KpiSettings {
   id: number
   included_stock_types: string[]  // parsed from JSON
   updated_at: string
+}
+
+export interface SnapshotDateInfo {
+  snapshot_date: string
+  total_rows: number
+  store_count: number
+  total_amount: number
+  is_active: number
 }
 
 export interface Session {

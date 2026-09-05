@@ -3,7 +3,7 @@
 // ============================================================
 import type {
   Store, StockSnapshot, ExclusionRequest,
-  KpiResult, KpiRateRow, KpiSettings, Session
+  KpiResult, KpiRateRow, KpiSettings, SnapshotDateInfo, Session
 } from '../types'
 
 const BASE = ''
@@ -49,8 +49,14 @@ export const api = {
       { headers: authHeaders() }
     ),
 
-  getStoreKpi: (store_id: string) =>
-    request<KpiResult>(`/api/kpi/store?store_id=${store_id}`, {
+  getStockItem: (id: number | string) =>
+    request<{ item: StockSnapshot }>(
+      `/api/stock/nonmove?id=${id}`,
+      { headers: authHeaders() }
+    ),
+
+  getStoreKpi: (store_id: string, ref_date?: string) =>
+    request<KpiResult>(`/api/kpi/store?store_id=${store_id}${ref_date ? `&ref_date=${ref_date}` : ''}`, {
       headers: authHeaders(),
     }),
 
@@ -145,6 +151,28 @@ export const api = {
         replaced: boolean
       }>
     }),
+
+  adminGetSnapshots: () =>
+    request<SnapshotDateInfo[]>('/api/admin/snapshots', { credentials: 'include' }),
+
+  adminToggleSnapshot: (date: string, is_active: number) =>
+    request<{ ok: boolean; snapshot_date: string; is_active: number }>(
+      `/api/admin/snapshots/${date}/toggle`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ is_active }),
+      }
+    ),
+
+  adminDeleteSnapshot: (date: string) =>
+    request<{ ok: boolean; snapshot_date: string; deleted_rows: number }>(
+      `/api/admin/snapshots/${date}`,
+      {
+        method: 'DELETE',
+        credentials: 'include',
+      }
+    ),
 
   adminGetRequests: (params?: Record<string, string>) =>
     request<ExclusionRequest[]>(

@@ -52,17 +52,37 @@ export async function calcStoreKpi(
 
   const placeholders = includedTypes.map(() => '?').join(',')
 
-  // Get latest date for this store
+  // Get latest ACTIVE date for this store
   const latestRow = await db.prepare(
-    'SELECT MAX(snapshot_date) as date FROM stock_snapshots WHERE store_id = ?'
+    'SELECT MAX(snapshot_date) as date FROM stock_snapshots WHERE store_id = ? AND COALESCE(is_active, 1) = 1'
   ).bind(store_id).first<{ date: string | null }>()
   const latestDate = latestRow?.date
   if (!latestDate) return null
 
-  // Reference date: default = 1st of current month
-  const now = new Date()
-  const defaultRef = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-  const refDate = referenceDate ?? defaultRef
+  // Reference date:
+  // 1. If explicitly passed, use it.
+  // 2. Otherwise, check if ${month}-01 exists.
+  // 3. If not, use the earliest active snapshot date in that same month.
+  const latestMonth = latestDate.slice(0, 7) // e.g. "2026-08"
+  let refDate = referenceDate
+
+  if (!refDate) {
+    const firstOfMonth = `${latestMonth}-01`
+    const hasFirst = await db.prepare(
+      'SELECT COUNT(*) as cnt FROM stock_snapshots WHERE store_id = ? AND snapshot_date = ? AND COALESCE(is_active, 1) = 1'
+    ).bind(store_id, firstOfMonth).first<{ cnt: number }>()
+
+    if (hasFirst && hasFirst.cnt > 0) {
+      refDate = firstOfMonth
+    } else {
+      // Find earliest active date in that month
+      const earliestRow = await db.prepare(
+        `SELECT MIN(snapshot_date) as date FROM stock_snapshots 
+         WHERE store_id = ? AND snapshot_date LIKE ? AND COALESCE(is_active, 1) = 1`
+      ).bind(store_id, `${latestMonth}%`).first<{ date: string | null }>()
+      refDate = earliestRow?.date ?? firstOfMonth
+    }
+  }
 
   // Get approved exclusion models
   const { results: approved } = await db.prepare(
@@ -81,6 +101,7 @@ export async function calcStoreKpi(
        WHERE store_id = ?
          AND snapshot_date = ?
          AND nonmove_flag = 'Nonmove'
+         AND COALESCE(is_active, 1) = 1
          AND stock_type IN (${placeholders})
          ${excludePlaceholders}`
     ).bind(...params).first<{ total: number }>()
@@ -100,7 +121,7 @@ export async function calcStoreKpi(
   const bucket = getBucket(pctGap)
 
   // Get KPI rate matrix (effective version for this month)
-  const effectiveMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const effectiveMonth = `${latestMonth}-01`
   const rateRow = await db.prepare(
     `SELECT rank_tier, rank_label, bucket, bucket_label, bucket_type, amount_thb
      FROM kpi_rate_matrix

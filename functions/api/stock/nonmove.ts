@@ -1,15 +1,27 @@
-// GET /api/stock/nonmove?store_id= — latest nonmove snapshot for a store
+// GET /api/stock/nonmove?store_id= or ?id=
 import type { PagesFunction } from '@cloudflare/workers-types'
 import type { Env } from '../_middleware'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
+  const idParam = url.searchParams.get('id')
   const store_id = url.searchParams.get('store_id')
+
+  // If queried by specific snapshot ID
+  if (idParam) {
+    const item = await env.DB.prepare(
+      `SELECT * FROM stock_snapshots WHERE id = ?`
+    ).bind(Number(idParam)).first()
+    if (!item) return Response.json({ error: 'Item not found' }, { status: 404 })
+    return Response.json({ item })
+  }
+
   if (!store_id) return Response.json({ error: 'store_id required' }, { status: 400 })
 
-  // Get latest snapshot date for this store
+  // Get latest active snapshot date for this store
   const latest = await env.DB.prepare(
-    `SELECT MAX(snapshot_date) as date FROM stock_snapshots WHERE store_id = ?`
+    `SELECT MAX(snapshot_date) as date FROM stock_snapshots 
+     WHERE store_id = ? AND COALESCE(is_active, 1) = 1`
   ).bind(store_id).first<{ date: string | null }>()
 
   if (!latest?.date) {
@@ -29,7 +41,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
             product_name, stock_type, assortment, nonmove_period, nonmove_flag,
             stock_qty, stock_amount, sku_amount
      FROM stock_snapshots
-     WHERE store_id = ? AND snapshot_date = ? AND nonmove_flag = 'Nonmove'
+     WHERE store_id = ? AND snapshot_date = ? AND nonmove_flag = 'Nonmove' AND COALESCE(is_active, 1) = 1
      ORDER BY
        CASE nonmove_period
          WHEN '121 up' THEN 0
