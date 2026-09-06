@@ -6,14 +6,14 @@ import type { KpiRateRow } from '../types'
 /**
  * Determine % gap bucket (1-8) from pct_gap value.
  * Buckets:
- *   1 = Increase 30%+    (pct >= 30)
- *   2 = Increase 20-29%  (20 <= pct < 30)
- *   3 = Increase 10-19%  (10 <= pct < 20)
- *   4 = Increase 0-9%    (0 <= pct < 10)
- *   5 = Reduce 0-9%      (-10 < pct < 0)
- *   6 = Reduce 10-19%    (-20 < pct <= -10)
- *   7 = Reduce 20-29%    (-30 < pct <= -20)
- *   8 = Reduce 30%+      (pct <= -30)
+ *   1 = Increase 30%+    (pct >= 30) -> เงินค่าปรับ
+ *   2 = Increase 20-29%  (20 <= pct < 30) -> เงินค่าปรับ
+ *   3 = Increase 10-19%  (10 <= pct < 20) -> เงินค่าปรับ
+ *   4 = Increase 0-9%    (0 <= pct < 10) -> เงินค่าปรับ
+ *   5 = Reduce 0-9%      (-10 < pct < 0) -> เงินรางวัล
+ *   6 = Reduce 10-19%    (-20 < pct <= -10) -> เงินรางวัล
+ *   7 = Reduce 20-29%    (-30 < pct <= -20) -> เงินรางวัล
+ *   8 = Reduce 30%+      (pct <= -30) -> เงินรางวัล
  */
 export function getBucket(pctGap: number): number {
   if (pctGap >= 30) return 1
@@ -38,8 +38,7 @@ export function getRank(amount: number): number {
 
 /**
  * Calculate % gap between latest and reference amounts.
- * Edge case: ref = 0, latest > 0 → return 100 (treat as worst = bucket 1)
- * Edge case: both 0 → return 0 (bucket 5)
+ * Formula: ((Last day total SKU amount - 1st day total SKU amount) / 1st day total SKU amount) * 100
  */
 export function calcPctGap(latest: number, reference: number): number {
   if (reference === 0) {
@@ -57,7 +56,6 @@ export function lookupRate(
   bucket: number,
   effectiveDate: string
 ): KpiRateRow | undefined {
-  // Get latest version on or before effectiveDate
   const versions = [...new Set(matrix.map(r => r.effective_from))]
     .filter(v => v <= effectiveDate)
     .sort()
@@ -68,21 +66,27 @@ export function lookupRate(
 }
 
 /**
- * Format THB number for display.
+ * Format THB number with 2 decimals and 'บ.' suffix.
  */
-export function formatTHB(amount: number): string {
-  const abs = Math.abs(amount)
-  const formatted = abs.toLocaleString('th-TH', { maximumFractionDigits: 0 })
-  if (amount < 0) return `-฿${formatted}`
-  if (amount > 0) return `+฿${formatted}`
-  return '฿0'
+export function formatAmount(amount: number | null | undefined): string {
+  const num = Number(amount) || 0
+  return num.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' บ.'
+}
+
+export function formatBaht(amount: number | null | undefined): string {
+  return formatAmount(amount)
 }
 
 /**
- * Format large stock amount.
+ * Format THB for KPI Payout (with sign, 2 decimals, and 'บ.').
  */
-export function formatAmount(amount: number): string {
-  return amount.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+export function formatTHB(amount: number | null | undefined): string {
+  const num = Number(amount) || 0
+  const abs = Math.abs(num)
+  const formatted = abs.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' บ.'
+  if (num < 0) return `- ${formatted}`
+  if (num > 0) return `+ ${formatted}`
+  return `0.00 บ.`
 }
 
 /**
@@ -112,3 +116,4 @@ export const REASON_LABELS: Record<string, string> = {
   system_error: 'ข้อมูลระบบไม่ตรงกับสต็อกจริง',
   other: 'อื่นๆ',
 }
+

@@ -1,5 +1,6 @@
 import type { KpiResult } from '../types'
 import { formatTHB, formatAmount } from '../lib/kpi'
+import RateMatrixTable from './RateMatrixTable'
 
 interface KpiSummaryBarProps {
   kpi: KpiResult | null
@@ -34,7 +35,7 @@ export default function KpiSummaryBar({
   const matrix = kpi?.matrix
 
   return (
-    <div className="bg-white border-b border-gray-200 shadow-sm">
+    <div className="bg-white border-b border-gray-200 shadow-sm space-y-3 pb-3">
       {/* 1. KPI Reward / Penalty Header Banner */}
       {kpi && (
         <div className={`p-4 ${
@@ -47,7 +48,7 @@ export default function KpiSummaryBar({
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="text-[11px] font-bold uppercase tracking-wider opacity-90">
-                {isReward ? '🎉 ผลการประเมิน KPI (ได้รับเงินรางวัล)' : '⚠️ ผลการประเมิน KPI (ปรับลดเงินรางวัล)'}
+                {isReward ? '🎉 ผลการประเมิน KPI (ได้รับเงินรางวัล)' : '⚠️ ผลการประเมิน KPI (เงินค่าปรับ)'}
               </div>
               <div className="text-3xl font-black tracking-tight mt-0.5">
                 {formatTHB(kpi.amount_thb)}
@@ -64,7 +65,7 @@ export default function KpiSummaryBar({
               <div className="text-xs font-bold">
                 ผลต่าง (% Gap):{' '}
                 <span className={`text-base font-black ${kpi.pct_gap > 0 ? 'text-rose-200' : 'text-emerald-200'}`}>
-                  {kpi.pct_gap > 0 ? '+' : ''}{kpi.pct_gap.toFixed(1)}%
+                  {kpi.pct_gap > 0 ? '+' : ''}{kpi.pct_gap.toFixed(2)}%
                 </span>
               </div>
               <div className="text-[11px] opacity-80">
@@ -75,11 +76,16 @@ export default function KpiSummaryBar({
         </div>
       )}
 
-      {/* 2. Detailed Cross-Table Breakdown Matrix (Requirement #1) */}
-      <div className="max-w-4xl mx-auto p-4 space-y-2">
+      {/* 2. Table Rate of Penalty / Reward (Requirement #3) */}
+      <div className="max-w-4xl mx-auto px-4">
+        <RateMatrixTable kpi={kpi} defaultExpanded={false} />
+      </div>
+
+      {/* 3. Detailed Cross-Table Breakdown Matrix (Requirement #1) */}
+      <div className="max-w-4xl mx-auto px-4 space-y-2">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
-            <span>📊 ตารางเปรียบเทียบรายละเอียด 4 ช่วงอายุ Nonmove</span>
+            <span>📊 ตารางเปรียบเทียบรายละเอียด 4 ช่วงอายุ Nonmove (หน่วย: บาท 2 ทศนิยม)</span>
           </h3>
           <span className="text-[11px] text-gray-400">เลื่อนตารางเพื่อดูครบทุกช่วง ↔</span>
         </div>
@@ -110,7 +116,7 @@ export default function KpiSummaryBar({
                   return (
                     <td key={col.key} className="py-2 px-2 bg-white">
                       <div className="font-bold text-gray-900">
-                        ฿{p ? formatAmount(p.amount) : '0'}
+                        {p ? formatAmount(p.amount) : '0.00 บ.'}
                       </div>
                       <div className="text-[10px] text-gray-500 mt-0.5">
                         {p?.sku_count ?? 0} SKU · {p?.qty ?? 0} ชิ้น
@@ -131,7 +137,7 @@ export default function KpiSummaryBar({
                   return (
                     <td key={col.key} className="py-2 px-2">
                       <div className="font-black text-gray-900">
-                        ฿{p ? formatAmount(p.amount) : '0'}
+                        {p ? formatAmount(p.amount) : '0.00 บ.'}
                       </div>
                       <div className="text-[10px] text-gray-600 font-semibold mt-0.5">
                         {p?.sku_count ?? 0} SKU · {p?.qty ?? 0} ชิ้น
@@ -157,10 +163,10 @@ export default function KpiSummaryBar({
                   return (
                     <td key={col.key} className="py-2 px-2">
                       <div className={`font-black ${isUp ? 'text-rose-600' : isDown ? 'text-emerald-600' : 'text-gray-600'}`}>
-                        {isUp ? '+' : ''}{diff !== 0 ? `฿${formatAmount(Math.abs(diff))}` : '฿0'}
+                        {isUp ? '+' : isDown ? '-' : ''}{diff !== 0 ? formatAmount(Math.abs(diff)) : '0.00 บ.'}
                       </div>
                       <div className={`text-[10px] font-bold mt-0.5 ${isUp ? 'text-rose-600' : isDown ? 'text-emerald-600' : 'text-gray-500'}`}>
-                        ({isUp ? '+' : ''}{gap.toFixed(1)}%)
+                        ({isUp ? '+' : ''}{gap.toFixed(2)}%)
                       </div>
                     </td>
                   )
@@ -173,7 +179,7 @@ export default function KpiSummaryBar({
         {/* Quick Footer Stats */}
         <div className="flex flex-wrap items-center justify-between text-xs text-gray-500 pt-1 px-1">
           <div>
-            สินค้า Nonmove ล่าสุด: <strong className="text-gray-900">{nonmoveCount ?? 0} SKU</strong> (มูลค่า ฿{formatAmount(nonmoveAmount ?? 0)})
+            สินค้า Nonmove ล่าสุด: <strong className="text-gray-900">{nonmoveCount ?? 0} SKU</strong> (มูลค่า {formatAmount(nonmoveAmount ?? 0)})
           </div>
           <div>
             ยื่นขอยกเว้นแล้ว: <strong className="text-amber-600">{requestedCount ?? 0} รายการ</strong>
@@ -183,3 +189,4 @@ export default function KpiSummaryBar({
     </div>
   )
 }
+

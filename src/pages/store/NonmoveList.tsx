@@ -228,42 +228,69 @@ export default function NonmoveList() {
                               : 'border-gray-200 hover:border-[#0057A8]'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-base text-gray-900 leading-snug">
-                          {item.model}
-                        </div>
-                        <div className="text-xs text-gray-600 mt-0.5 line-clamp-1">
-                          {item.product_name || '-'}
-                        </div>
-                        <div className="text-[11px] text-gray-400 mt-1">
-                          {item.product_code ? `รหัส: ${item.product_code} · ` : ''}
-                          {item.category}{item.subcategory ? ` / ${item.subcategory}` : ''}
+                    {/* Top Row: Period Group Badge & Status */}
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <PeriodChip period={item.nonmove_period || period} />
+                        {item.stock_type && (
+                          <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">
+                            {item.stock_type}
+                          </span>
+                        )}
+                      </div>
+                      {item.request_status && (
+                        <StatusChip status={item.request_status} />
+                      )}
+                    </div>
+
+                    {/* Middle Row: Model & Product Name */}
+                    <div className="space-y-1">
+                      <div className="font-bold text-base text-gray-900 leading-snug">
+                        {item.model}
+                      </div>
+                      <div className="text-xs text-gray-600 line-clamp-1">
+                        {item.product_name || '-'}
+                      </div>
+                      <div className="text-[11px] text-gray-400">
+                        {item.product_code ? `รหัส: ${item.product_code} · ` : ''}
+                        {item.category}{item.subcategory ? ` / ${item.subcategory}` : ''}
+                        {item.assortment ? ` · ${item.assortment}` : ''}
+                      </div>
+                    </div>
+
+                    {/* Metrics Grid: SKU Amount, Stock QTY, and Total Stock Amount */}
+                    <div className="grid grid-cols-3 gap-2 mt-3 pt-2.5 border-t border-gray-100 bg-gray-50/70 p-2.5 rounded-xl text-center">
+                      <div className="text-left">
+                        <div className="text-[10px] text-gray-500 font-medium">ราคาต่อชิ้น (SKU Amount)</div>
+                        <div className="text-xs font-bold text-gray-800 mt-0.5">
+                          {formatAmount(item.sku_amount ?? (item.stock_qty ? (item.stock_amount ?? 0) / item.stock_qty : 0))}
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <div className="text-xs text-gray-500 font-medium">
-                          จำนวน: <span className="font-bold text-gray-800">{item.stock_qty ?? 1}</span>
+                      <div>
+                        <div className="text-[10px] text-gray-500 font-medium">จำนวนสต็อก (Unit)</div>
+                        <div className="text-xs font-black text-[#0057A8] mt-0.5">
+                          {item.stock_qty ?? 1} เครื่อง
                         </div>
-                        <div className={`text-base font-extrabold ${isApproved ? 'line-through text-gray-400' : 'text-gray-900'}`}>
-                          ฿{formatAmount(item.stock_amount ?? 0)}
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-[10px] text-gray-500 font-medium">มูลค่ารวม (Stock Amount)</div>
+                        <div className={`text-xs font-black mt-0.5 ${isApproved ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+                          {formatAmount(item.stock_amount ?? 0)}
                         </div>
                       </div>
                     </div>
 
-                    {/* Request Status Callout Bar */}
-                    <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between">
+                    {/* Action Callout Bar */}
+                    <div className="mt-2.5 pt-2 flex items-center justify-between">
                       {item.request_status ? (
-                        <div className="flex items-center gap-2">
-                          <StatusChip status={item.request_status} />
-                          <span className="text-[11px] font-medium text-gray-500">
-                            {isApproved && '✓ ได้รับการยกเว้นจาก KPI แล้ว'}
-                            {isPending && '⏳ Admin กำลังตรวจสอบ'}
-                            {isNeedsResubmit && '⚠️ กรุณากดเพื่อส่งข้อมูลเพิ่ม'}
-                            {isRejected && '❌ ไม่อนุมัติ (กดเพื่อยื่นใหม่)'}
-                          </span>
-                        </div>
+                        <span className="text-[11px] font-medium text-gray-500">
+                          {isApproved && '✓ ได้รับการยกเว้นจาก KPI แล้ว'}
+                          {isPending && '⏳ Admin กำลังตรวจสอบ'}
+                          {isNeedsResubmit && '⚠️ กรุณากดเพื่อส่งข้อมูลเพิ่ม'}
+                          {isRejected && '❌ ไม่อนุมัติ (กดเพื่อยื่นใหม่)'}
+                        </span>
                       ) : (
                         <div className="flex items-center gap-1.5 text-xs text-[#0057A8] font-bold">
                           <span>➕ ขอยกเว้นรายการนี้</span>

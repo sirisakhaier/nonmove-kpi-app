@@ -91,7 +91,7 @@ export default function AdminDashboard() {
           <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-2xs">
             <div className="text-xs font-bold uppercase tracking-wider text-gray-400">📦 มูลค่า Nonmove ล่าสุด</div>
             <div className="text-2xl font-black text-[#0057A8] mt-1">
-              ฿{formatAmount(totalLatestAmount)}
+              {formatAmount(totalLatestAmount)}
             </div>
             <div className="text-xs text-gray-500 mt-1">
               ยอดรวมเฉพาะสถานะ Active
@@ -99,17 +99,17 @@ export default function AdminDashboard() {
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-2xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-400">🏆 รางวัล / ปรับลด</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-400">🏆 เงินรางวัล / เงินค่าปรับ</div>
             <div className="text-2xl font-black text-emerald-600 mt-1">
               {totalRewardCount} <span className="text-xs font-bold text-gray-400">/</span> <span className="text-rose-600">{totalPenaltyCount}</span>
             </div>
             <div className="text-xs text-gray-500 mt-1">
-              ได้รางวัล {totalRewardCount} สาขา · ปรับลด {totalPenaltyCount} สาขา
+              เงินรางวัล {totalRewardCount} สาขา · เงินค่าปรับ {totalPenaltyCount} สาขา
             </div>
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-2xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-400">💰 ยอดสุทธิ Reward/Penalty</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-400">💰 ยอดสุทธิ เงินรางวัล / เงินค่าปรับ</div>
             <div className={`text-2xl font-black mt-1 ${netPayoutAmount >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               {formatTHB(netPayoutAmount)}
             </div>
@@ -192,7 +192,7 @@ export default function AdminDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1e6).toFixed(1)}M`} />
-                <Tooltip formatter={(v: number) => [`฿${formatAmount(v)}`, 'Nonmove Amount']} />
+                <Tooltip formatter={(v: number) => [formatAmount(v), 'Nonmove Amount']} />
                 <Line
                   type="monotone"
                   dataKey="total_amount"
@@ -212,7 +212,7 @@ export default function AdminDashboard() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h2 className="font-bold text-base text-gray-900">ตารางผลการประเมิน KPI รายสาขา</h2>
-                <p className="text-xs text-gray-500">เปรียบเทียบยอดต้นเดือน vs ยอดล่าสุด</p>
+                <p className="text-xs text-gray-500">เปรียบเทียบยอดต้นเดือน vs ยอดล่าสุด (หน่วย: บาท 2 ทศนิยม)</p>
               </div>
               <span className="text-xs bg-gray-100 px-3 py-1 rounded-full text-gray-700 font-bold">
                 {filteredKpiRows.length} สาขา
@@ -230,7 +230,7 @@ export default function AdminDashboard() {
                     <th className="py-3 px-4 text-right">ยอดล่าสุด</th>
                     <th className="py-3 px-4 text-right">% Gap</th>
                     <th className="py-3 px-4 text-center">Rank</th>
-                    <th className="py-3 px-4 text-right">ผลประเมิน KPI (THB)</th>
+                    <th className="py-3 px-4 text-right">ผลประเมิน เงินรางวัล / เงินค่าปรับ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 font-medium">
@@ -248,12 +248,12 @@ export default function AdminDashboard() {
                         <td className="py-3.5 px-4 font-mono font-bold text-gray-600">{row.store_id}</td>
                         <td className="py-3.5 px-4 font-bold text-gray-900">{row.store_name}</td>
                         <td className="py-3.5 px-4 text-gray-500">{row.region}</td>
-                        <td className="py-3.5 px-4 text-right text-gray-500">฿{formatAmount(row.reference_amount)}</td>
-                        <td className="py-3.5 px-4 text-right font-bold text-gray-900">฿{formatAmount(row.latest_amount)}</td>
+                        <td className="py-3.5 px-4 text-right text-gray-500">{formatAmount(row.reference_amount)}</td>
+                        <td className="py-3.5 px-4 text-right font-bold text-gray-900">{formatAmount(row.latest_amount)}</td>
                         <td className={`py-3.5 px-4 text-right font-bold ${
                           row.pct_gap > 0 ? 'text-rose-600' : row.pct_gap < 0 ? 'text-emerald-600' : 'text-gray-500'
                         }`}>
-                          {row.pct_gap > 0 ? '+' : ''}{row.pct_gap.toFixed(1)}%
+                          {row.pct_gap > 0 ? '+' : ''}{row.pct_gap.toFixed(2)}%
                         </td>
                         <td className="py-3.5 px-4 text-center">
                           <span className="bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
