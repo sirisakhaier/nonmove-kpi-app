@@ -10,9 +10,20 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env, params
   const date = params.date as string
   if (!date) return Response.json({ error: 'date required' }, { status: 400 })
 
-  const result = await env.DB.prepare(
-    `DELETE FROM stock_snapshots WHERE snapshot_date = ?`
-  ).bind(date).run()
+  try {
+    // 1. Unlink any exclusion requests for this date so foreign keys never fail
+    await env.DB.prepare(
+      `UPDATE exclusion_requests SET stock_snapshot_id = NULL WHERE snapshot_date = ?`
+    ).bind(date).run().catch(() => {})
 
-  return Response.json({ ok: true, snapshot_date: date, deleted_rows: result.meta.changes })
+    // 2. Delete snapshot rows for this exact date
+    const result = await env.DB.prepare(
+      `DELETE FROM stock_snapshots WHERE snapshot_date = ?`
+    ).bind(date).run()
+
+    return Response.json({ ok: true, snapshot_date: date, deleted_rows: result.meta.changes })
+  } catch (err: any) {
+    return Response.json({ error: err.message ?? 'Failed to delete snapshot date' }, { status: 500 })
+  }
 }
+

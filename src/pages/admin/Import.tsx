@@ -6,13 +6,19 @@ import Header from '../../components/Header'
 import { formatAmount } from '../../lib/kpi'
 import { extractExactDate } from '../../lib/excelDate'
 
-interface ParsedFileInfo {
-  file: File
+interface DateGroup {
   date: string
   rowsCount: number
+  rows: any[]
+}
+
+interface ParsedFileInfo {
+  file: File
+  dateGroups: DateGroup[]
+  allDates: string[]
+  totalRowsCount: number
   storesCount: number
   stores: any[]
-  rows: any[]
 }
 
 export default function AdminImport() {
@@ -24,7 +30,7 @@ export default function AdminImport() {
   const [progressText, setProgressText] = useState('')
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
-  const [duplicateModal, setDuplicateModal] = useState<SnapshotDateInfo | null>(null)
+  const [duplicateDates, setDuplicateDates] = useState<SnapshotDateInfo[]>([])
 
   // Snapshot dates management state
   const [snapshots, setSnapshots] = useState<SnapshotDateInfo[]>([])
@@ -32,6 +38,8 @@ export default function AdminImport() {
   const [togglingDate, setTogglingDate] = useState<string | null>(null)
   const [deletingDate, setDeletingDate] = useState<string | null>(null)
   const [dateToDelete, setDateToDelete] = useState<string | null>(null)
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
 
   const loadSnapshots = useCallback(async () => {
     setLoadingSnapshots(true)
@@ -51,7 +59,7 @@ export default function AdminImport() {
     loadSnapshots()
   }, [loadSnapshots])
 
-  // Handle file selection and client-side parsing
+  // Handle file selection and client-side parsing per row
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -59,7 +67,7 @@ export default function AdminImport() {
     setParsing(true)
     setError('')
     setResult(null)
-    setDuplicateModal(null)
+    setDuplicateDates([])
     setFileInfo(null)
 
     try {
@@ -73,24 +81,12 @@ export default function AdminImport() {
         throw new Error('ไฟล์ Excel ว่างเปล่า ไม่มีข้อมูล')
       }
 
-      // 1. Extract exact date from first row's Date column
-      const firstRow = rawRows[0]
-      const dateRawVal = firstRow['Date'] ?? firstRow['date'] ?? firstRow['DATE']
-      const cellA2 = ws['A2']
-      const formattedText = cellA2?.w
-
-      const exactDate = extractExactDate(dateRawVal, formattedText)
-      if (!exactDate) {
-        throw new Error('ไม่พบข้อมูลคอลัมน์ "Date" หรือรูปแบบวันที่ไม่ถูกต้องในแถวแรก')
-      }
-
-      // 2. Normalize and clean rows
       const storesMap = new Map<string, any>()
-      const cleanedRows: any[] = []
+      const dateGroupsMap = new Map<string, any[]>()
+      let lastKnownDate = ''
 
       for (let i = 0; i < rawRows.length; i++) {
         const r = rawRows[i]
-        // Normalize keys (trim whitespace in column headers)
         const row: Record<string, any> = {}
         for (const [k, v] of Object.entries(r)) {
           row[k.trim()] = v
@@ -100,7 +96,20 @@ export default function AdminImport() {
         const model = String(row['Model'] ?? row['model'] ?? '').trim()
         if (!sid || !model) continue
 
-        // Collect unique stores
+        // Extract exact date per row
+        const dateRawVal = row['Date'] ?? row['date'] ?? row['DATE']
+        let rowDate = extractExactDate(dateRawVal)
+        if (!rowDate && lastKnownDate) {
+          rowDate = lastKnownDate
+        } else if (rowDate) {
+          lastKnownDate = rowDate
+        }
+
+        if (!rowDate) {
+          continue // skip row if no valid date found
+        }
+
+        // Collect stores
         if (!storesMap.has(sid)) {
           storesMap.set(sid, {
             store_id: sid,
@@ -115,7 +124,7 @@ export default function AdminImport() {
         const stockAmt = parseFloat(row['Stock Amount'] ?? row['stock_amount'] ?? 0) || 0
         const skuAmt = parseFloat(row['SKU Amount'] ?? row['sku_amount'] ?? 0) || 0
 
-        cleanedRows.push({
+        const cleanedRow = {
           store_id: sid,
           model,
           category: String(row['Category'] ?? row['category'] ?? '').trim() || null,
@@ -129,24 +138,44 @@ export default function AdminImport() {
           stock_qty: qty,
           stock_amount: stockAmt,
           sku_amount: skuAmt,
-        })
+        }
+
+        if (!dateGroupsMap.has(rowDate)) {
+          dateGroupsMap.set(rowDate, [])
+        }
+        dateGroupsMap.get(rowDate)!.push(cleanedRow)
       }
+
+      if (dateGroupsMap.size === 0) {
+        throw new Error('ไม่พบข้อมูลคอลัมน์ "Date" หรือข้อมูลไม่ถูกต้องในไฟล์ Excel')
+      }
+
+      const dateGroups: DateGroup[] = Array.from(dateGroupsMap.entries())
+        .map(([date, rows]) => ({
+          date,
+          rowsCount: rows.length,
+          rows,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+
+      const allDates = dateGroups.map(g => g.date)
+      const totalRowsCount = dateGroups.reduce((acc, g) => acc + g.rowsCount, 0)
 
       const parsed: ParsedFileInfo = {
         file,
-        date: exactDate,
-        rowsCount: cleanedRows.length,
+        dateGroups,
+        allDates,
+        totalRowsCount,
         storesCount: storesMap.size,
         stores: Array.from(storesMap.values()),
-        rows: cleanedRows,
       }
 
       setFileInfo(parsed)
 
-      // 3. Check if exact date already exists in database
-      const existing = snapshots.find(s => s.snapshot_date === exactDate)
-      if (existing) {
-        setDuplicateModal(existing)
+      // Check duplicates against database
+      const duplicates = snapshots.filter(s => allDates.includes(s.snapshot_date))
+      if (duplicates.length > 0) {
+        setDuplicateDates(duplicates)
       }
     } catch (err: any) {
       setError(err.message ?? 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel')
@@ -156,42 +185,51 @@ export default function AdminImport() {
     }
   }
 
-  // Execute upload in chunks
+  // Execute upload across all date groups
   const executeUpload = async (replace = false) => {
     if (!fileInfo) return
 
     setLoading(true)
     setError('')
     setResult(null)
-    setDuplicateModal(null)
+    setDuplicateDates([])
     setProgress(0)
 
     try {
-      const { date, rows, stores } = fileInfo
+      const { dateGroups, stores, totalRowsCount } = fileInfo
       const chunkSize = 300
-      const totalChunks = Math.ceil(rows.length / chunkSize)
       let totalInserted = 0
+      let processedRows = 0
 
-      for (let i = 0; i < totalChunks; i++) {
-        const chunkRows = rows.slice(i * chunkSize, (i + 1) * chunkSize)
-        const isFirstChunk = i === 0
+      // Upload group by group
+      for (const group of dateGroups) {
+        const totalChunks = Math.ceil(group.rows.length / chunkSize)
 
-        setProgressText(`กำลังบันทึกข้อมูล... ${Math.round(((i + 1) / totalChunks) * 100)}% (${Math.min((i + 1) * chunkSize, rows.length).toLocaleString()} / ${rows.length.toLocaleString()} แถว)`)
-        setProgress(Math.round(((i + 1) / totalChunks) * 100))
+        for (let i = 0; i < totalChunks; i++) {
+          const chunkRows = group.rows.slice(i * chunkSize, (i + 1) * chunkSize)
+          const isFirstChunk = i === 0
 
-        const res = await api.adminImportData({
-          snapshot_date: date,
-          is_first_chunk: isFirstChunk,
-          replace: replace,
-          stores: isFirstChunk ? stores : undefined,
-          rows: chunkRows,
-        })
+          processedRows += chunkRows.length
+          const currentPct = Math.min(100, Math.round((processedRows / totalRowsCount) * 100))
 
-        totalInserted += res.rows_inserted
+          setProgressText(`กำลังบันทึกข้อมูลวันที่ ${group.date}... (${processedRows.toLocaleString()} / ${totalRowsCount.toLocaleString()} แถว)`)
+          setProgress(currentPct)
+
+          const res = await api.adminImportData({
+            snapshot_date: group.date,
+            is_first_chunk: isFirstChunk,
+            replace: replace,
+            stores: (group === dateGroups[0] && isFirstChunk) ? stores : undefined,
+            rows: chunkRows,
+          })
+
+          totalInserted += res.rows_inserted
+        }
       }
 
       setResult({
-        date,
+        dates: fileInfo.allDates,
+        dateGroups: fileInfo.dateGroups,
         rows_imported: totalInserted,
         stores_upserted: stores.length,
         replaced: replace,
@@ -209,7 +247,7 @@ export default function AdminImport() {
   }
 
   const cancelDuplicateUpload = () => {
-    setDuplicateModal(null)
+    setDuplicateDates([])
     setFileInfo(null)
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -241,6 +279,20 @@ export default function AdminImport() {
     }
   }
 
+  const handleDeleteAll = async () => {
+    setDeletingAll(true)
+    try {
+      await api.adminDeleteAllSnapshots()
+      setShowDeleteAllModal(false)
+      await loadSnapshots()
+      alert('ลบข้อมูลสต็อกทั้งหมดในระบบเรียบร้อยแล้ว')
+    } catch (e: any) {
+      alert('เกิดข้อผิดพลาดในการลบข้อมูลทั้งหมด: ' + (e.message ?? 'Unknown error'))
+    } finally {
+      setDeletingAll(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col pb-16">
       <Header adminMode title="จัดการข้อมูล & นำเข้า Excel" />
@@ -255,7 +307,7 @@ export default function AdminImport() {
                 <span>📥 นำเข้าไฟล์ Stock รายวัน (.xlsx)</span>
               </h2>
               <p className="text-xs text-gray-500 mb-4">
-                อัปโหลดไฟล์ Excel ในรูปแบบ <code>Stock Daily GH for Nonmove KPI.xlsx</code> ระบบจะอ่านคอลัมน์ <strong>Date</strong> ตามข้อมูลจริง และบันทึกข้อมูลอย่างแม่นยำ
+                รองรับไฟล์ที่มี <strong>วันที่เดียว หรือหลายวันที่ในไฟล์เดียวกัน</strong> ระบบจะแยกและบันทึกตามคอลัมน์ <strong>Date</strong> ของแต่ละแถวโดยตรง
               </p>
 
               <div
@@ -275,14 +327,26 @@ export default function AdminImport() {
                 ) : fileInfo ? (
                   <div>
                     <div className="font-bold text-emerald-800 text-sm">{fileInfo.file.name}</div>
-                    <div className="text-xs text-gray-600 mt-1">
-                      📅 วันที่ในไฟล์: <strong className="text-gray-900">{fileInfo.date}</strong> · {fileInfo.rowsCount.toLocaleString()} แถว · {fileInfo.storesCount} สาขา
+                    <div className="text-xs text-gray-600 mt-2 space-y-1">
+                      <div>
+                        📅 พบ <strong>{fileInfo.allDates.length} วันที่</strong> ในไฟล์:
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-1.5 mt-1">
+                        {fileInfo.dateGroups.map(g => (
+                          <span key={g.date} className="bg-blue-100 text-[#0057A8] font-bold px-2 py-0.5 rounded-md text-[11px]">
+                            {g.date} ({g.rowsCount.toLocaleString()} แถว)
+                          </span>
+                        ))}
+                      </div>
+                      <div className="text-[11px] text-gray-500 pt-1">
+                        รวมทั้งหมด: <strong>{fileInfo.totalRowsCount.toLocaleString()} แถว</strong> · <strong>{fileInfo.storesCount} สาขา</strong>
+                      </div>
                     </div>
                   </div>
                 ) : (
                   <div>
                     <div className="text-xs font-bold text-[#0057A8]">คลิกเพื่อเลือกไฟล์ Excel หรือลากไฟล์มาวาง</div>
-                    <div className="text-[11px] text-gray-400 mt-1">รองรับนามสกุล .xlsx (ใช้ค่าจากคอลัมน์ Date โดยตรง)</div>
+                    <div className="text-[11px] text-gray-400 mt-1">รองรับนามสกุล .xlsx (อ่านวันที่รายแถว ไม่มีการ Merge วันที่)</div>
                   </div>
                 )}
               </div>
@@ -323,18 +387,18 @@ export default function AdminImport() {
                     <span>✓</span>
                     <span>นำเข้าข้อมูลสำเร็จ!</span>
                   </div>
-                  <div className="space-y-0.5 mt-2 font-medium">
-                    <div>วันที่ในข้อมูล: <strong className="font-black text-gray-900">{result.date}</strong></div>
-                    <div>จำนวนข้อมูลที่บันทึก: <strong>{result.rows_imported?.toLocaleString()} แถว</strong></div>
+                  <div className="space-y-1 mt-2 font-medium">
+                    <div>วันที่นำเข้า: <strong>{result.dates?.join(', ')}</strong></div>
+                    <div>จำนวนข้อมูลทั้งหมด: <strong>{result.rows_imported?.toLocaleString()} แถว</strong></div>
                     <div>สาขาที่อัปเดต: <strong>{result.stores_upserted} สาขา</strong></div>
-                    {result.replaced && <div className="text-amber-800 font-bold mt-1">*(เขียนทับข้อมูลเดิมของวันที่นี้เรียบร้อย)</div>}
+                    {result.replaced && <div className="text-amber-800 font-bold mt-1">*(เขียนทับข้อมูลเดิมของวันที่ที่ซ้ำเรียบร้อย)</div>}
                   </div>
                 </div>
               )}
             </div>
 
             {/* Action Buttons */}
-            {fileInfo && !duplicateModal && (
+            {fileInfo && duplicateDates.length === 0 && (
               <button
                 onClick={() => executeUpload(false)}
                 disabled={loading || parsing}
@@ -346,7 +410,7 @@ export default function AdminImport() {
                     <span>กำลังบันทึกข้อมูล...</span>
                   </>
                 ) : (
-                  <span>🚀 ยืนยันนำเข้าข้อมูลวันที่ {fileInfo.date} ({fileInfo.rowsCount.toLocaleString()} แถว)</span>
+                  <span>🚀 ยืนยันนำเข้าข้อมูล {fileInfo.allDates.join(' & ')} ({fileInfo.totalRowsCount.toLocaleString()} แถว)</span>
                 )}
               </button>
             )}
@@ -355,21 +419,21 @@ export default function AdminImport() {
           {/* Guide Card */}
           <div className="lg:col-span-6 bg-white rounded-2xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
             <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-1">💡 คำแนะนำวันที่ในข้อมูล (Exact Date Rules)</h2>
+              <h2 className="text-lg font-bold text-gray-900 mb-1">💡 คำแนะนำการจัดการข้อมูลสต็อก</h2>
               <div className="text-xs text-gray-600 space-y-3 mt-3 leading-relaxed">
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
-                  <strong className="text-[#0057A8] block mb-1">1. ใช้วันที่จริงจากคอลัมน์ Date:</strong>
-                  ระบบจะอ่านวันที่จากคอลัมน์ <strong>Date</strong> ในไฟล์ Excel โดยตรง ไม่มีการปรับเปลี่ยนหรือเลื่อนวัน
+                  <strong className="text-[#0057A8] block mb-1">1. อ่านวันที่รายแถว (Row-by-Row Date Extraction):</strong>
+                  ระบบจะอ่านวันที่จากคอลัมน์ <strong>Date</strong> ของแต่ละแถวโดยตรง ทำให้ไฟล์ที่มีข้อมูลหลายวัน (เช่น 01/09/2026 และ 05/09/2026) ถูกแยกจัดเก็บตามวันที่จริงอย่างถูกต้อง ไม่มีการรวมวันที่
                 </div>
 
                 <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
                   <strong className="text-amber-800 block mb-1">2. ตรวจสอบข้อมูลซ้ำอัตโนมัติ:</strong>
-                  หากตรวจพบว่าวันที่ในไฟล์ Excel มีอยู่ในระบบแล้ว ระบบจะแสดงหน้าต่างแจ้งเตือนให้เลือกว่าจะ <strong>"แทนที่ข้อมูลเดิม (Replace)"</strong> หรือ <strong>"ยกเลิก (Cancel)"</strong> ทันที ป้องกันข้อมูลซ้ำซ้อน
+                  หากวันที่ที่อัปโหลดมีอยู่ในระบบแล้ว ระบบจะแสดงตัวเลือกว่าต้องการ <strong>"แทนที่ข้อมูลเดิม (Replace)"</strong> หรือ <strong>"ยกเลิก (Cancel)"</strong>
                 </div>
 
-                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-                  <strong className="text-emerald-800 block mb-1">3. การประเมินผล KPI:</strong>
-                  ระบบจะเปรียบเทียบระหว่าง <strong>วันที่ต้นเดือน (1st Date of Month)</strong> กับ <strong>วันที่ล่าสุด (Latest Date)</strong> ที่เปิดสถานะ Active อยู่
+                <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
+                  <strong className="text-rose-800 block mb-1">3. ลบและนำเข้าใหม่อย่างอิสระ:</strong>
+                  Admin สามารถลบข้อมูลเฉพาะวันที่ หรือลบข้อมูลสต็อกทั้งหมดในระบบได้ทันที โดยไม่มีข้อจำกัดหรือ Error ใดๆ
                 </div>
               </div>
             </div>
@@ -387,12 +451,22 @@ export default function AdminImport() {
                 เปิด/ปิดการใช้งาน หรือลบข้อมูลของแต่ละวันที่ในระบบ D1 Database
               </p>
             </div>
-            <button
-              onClick={loadSnapshots}
-              className="self-start text-xs font-semibold text-[#0057A8] hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 transition-colors"
-            >
-              🔄 รีเฟรชรายการ
-            </button>
+            <div className="flex items-center gap-2">
+              {snapshots.length > 0 && (
+                <button
+                  onClick={() => setShowDeleteAllModal(true)}
+                  className="text-xs font-bold text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200 transition-colors"
+                >
+                  🗑️ ลบข้อมูลทั้งหมด (Delete All)
+                </button>
+              )}
+              <button
+                onClick={loadSnapshots}
+                className="text-xs font-semibold text-[#0057A8] hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 transition-colors"
+              >
+                🔄 รีเฟรชรายการ
+              </button>
+            </div>
           </div>
 
           {loadingSnapshots && (
@@ -478,8 +552,8 @@ export default function AdminImport() {
         </div>
       </div>
 
-      {/* Duplicate Date Alert Modal (Requirement #2) */}
-      {duplicateModal && fileInfo && (
+      {/* Duplicate Dates Alert Modal */}
+      {duplicateDates.length > 0 && fileInfo && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center text-3xl mx-auto">
@@ -487,18 +561,23 @@ export default function AdminImport() {
             </div>
             <div className="text-center">
               <h3 className="font-bold text-lg text-gray-900">
-                พบข้อมูลวันที่ {fileInfo.date} ในระบบแล้ว
+                พบข้อมูลวันที่ซ้ำในระบบ
               </h3>
-              <p className="text-xs text-gray-600 mt-2 leading-relaxed">
-                ในระบบมีข้อมูลของวันที่ <strong>{fileInfo.date}</strong> อยู่แล้วจำนวน <strong>{duplicateModal.total_rows.toLocaleString()} แถว</strong>
-                <br />
-                (ไฟล์ที่คุณเลือกมีข้อมูลใหม่จำนวน <strong>{fileInfo.rowsCount.toLocaleString()} แถว</strong>)
-              </p>
+              <div className="text-xs text-gray-600 mt-2 leading-relaxed">
+                วันที่พบข้อมูลซ้ำในระบบ:
+                <div className="font-bold text-gray-900 my-1.5 space-y-1">
+                  {duplicateDates.map(d => (
+                    <div key={d.snapshot_date} className="bg-amber-50 text-amber-900 p-1.5 rounded border border-amber-200">
+                      📅 วันที่ {d.snapshot_date} (มีอยู่แล้ว {d.total_rows.toLocaleString()} แถว)
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 mt-3 text-left">
                 💡 <strong>ต้องการดำเนินการอย่างไร?</strong>
                 <ul className="list-disc list-inside mt-1 space-y-0.5 text-amber-800">
-                  <li><strong>แทนที่ข้อมูลเดิม (Replace):</strong> ลบข้อมูลเดิมของวันที่นี้ออก แล้วบันทึกข้อมูลจากไฟล์ใหม่แทนที่</li>
-                  <li><strong>ยกเลิก (Cancel):</strong> ไม่นำเข้าไฟล์นี้ ข้อมูลเดิมในระบบจะคงเดิม ไม่เกิดข้อมูลซ้ำ</li>
+                  <li><strong>แทนที่ข้อมูลเดิม (Replace):</strong> ลบข้อมูลเดิมของวันที่ซ้ำออก แล้วบันทึกข้อมูลจากไฟล์ใหม่แทนที่</li>
+                  <li><strong>ยกเลิก (Cancel):</strong> ไม่นำเข้าไฟล์นี้ ข้อมูลเดิมในระบบจะคงเดิม</li>
                 </ul>
               </div>
             </div>
@@ -523,7 +602,7 @@ export default function AdminImport() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Single Date Confirmation Modal */}
       {dateToDelete && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
@@ -554,6 +633,40 @@ export default function AdminImport() {
           </div>
         </div>
       )}
+
+      {/* Delete ALL Data Confirmation Modal */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4 border-2 border-rose-500">
+            <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-3xl mx-auto">
+              ⚠️
+            </div>
+            <div className="text-center">
+              <h3 className="font-bold text-lg text-rose-700">ยืนยันลบข้อมูลสต็อกทั้งหมด?</h3>
+              <p className="text-xs text-gray-600 mt-2 leading-relaxed">
+                ข้อมูลสต็อก Nonmove <strong>ทุกวันที่ในระบบ ({snapshots.length} วันที่)</strong> จะถูกลบออกทั้งหมดอย่างถาวร เพื่อให้สามารถเริ่มนำเข้าข้อมูลใหม่ได้อย่างสมบูรณ์
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                onClick={handleDeleteAll}
+                disabled={deletingAll}
+                className="bg-rose-600 hover:bg-rose-700 text-white py-2.5 rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1"
+              >
+                {deletingAll ? 'กำลังลบทั้งหมด...' : '🗑️ ยืนยันลบทั้งหมด'}
+              </button>
+              <button
+                onClick={() => setShowDeleteAllModal(false)}
+                disabled={deletingAll}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-xs font-semibold"
+              >
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

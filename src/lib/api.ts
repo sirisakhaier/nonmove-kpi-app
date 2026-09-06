@@ -190,6 +190,15 @@ export const api = {
       }
     ),
 
+  adminDeleteAllSnapshots: () =>
+    request<{ ok: boolean; deleted_rows: number }>(
+      '/api/admin/snapshots/all',
+      {
+        method: 'DELETE',
+        credentials: 'include',
+      }
+    ),
+
   adminGetRequests: (params?: Record<string, string>) =>
     request<ExclusionRequest[]>(
       '/api/admin/requests?' + new URLSearchParams(params ?? {}),
